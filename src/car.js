@@ -1,8 +1,8 @@
 // Arcade car physics on the XZ plane. Heading h: forward = (sin h, cos h), right = (cos h, -sin h).
 
 const WHEELBASE = 2.36;
-const BASE_TOP = 40; // m/s (~144 km/h) before stat multipliers
-const BASE_ACCEL = 10.5;
+export const BASE_TOP = 44; // m/s (~158 km/h) before stat multipliers
+const BASE_ACCEL = 14.5;
 const BRAKE = 22;
 const NITRO_BURN = 0.32; // tank per second
 const OFFROAD = 2.2; // extra metres before the hard wall
@@ -57,7 +57,7 @@ export class CarPhysics {
     // Longitudinal
     if (this.throttle > 0) {
       const room = Math.max(0, 1 - Math.max(0, vF) / top);
-      vF += accel * this.throttle * (0.25 + 0.75 * room) * dt;
+      vF += accel * this.throttle * (0.4 + 0.6 * room) * dt;
     }
     if (this.brake > 0) {
       if (vF > 0.5) vF -= BRAKE * this.brake * dt;

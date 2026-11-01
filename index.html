@@ -231,43 +231,29 @@
         </div>
       </section>
 
-      <!-- RACE HUD -->
+      <!-- RACE HUD: corners only; the centre-lower band (your car) stays clear -->
       <section class="screen screen-race" id="screen-race" data-screen="race" aria-label="Race">
         <div class="hud-tl">
-          <div class="hud-pos"><span id="hudPlace">1</span><sup id="hudPlaceSuf">st</sup><span class="hud-total">/<span id="hudTotal">8</span></span></div>
-          <div class="hud-lap">LAP <b id="hudLap">1</b>/<span id="hudLaps">3</span></div>
-        </div>
-        <div class="hud-tc">
+          <div class="hud-row">
+            <div class="hud-pos"><span id="hudPlace">1</span><sup id="hudPlaceSuf">st</sup><span class="hud-total">/<span id="hudTotal">8</span></span></div>
+            <div class="hud-lap">LAP <b id="hudLap">1</b>/<span id="hudLaps">3</span></div>
+          </div>
           <div class="hud-time" id="hudTime">0:00.00</div>
-          <div class="hud-sub"><span>LAP <b id="hudLapTime">0:00.00</b></span><span>BEST <b id="hudBest">--:--.--</b></span></div>
+          <div class="hud-sub"><span>BEST <b id="hudBest">--:--.--</b></span></div>
+          <div class="hud-drift" id="hudDrift"><div class="drift-label">DRIFT <b id="hudDriftVal">0 m</b></div><div class="drift-bar"><i id="hudDriftFill"></i></div></div>
         </div>
         <div class="hud-tr">
           <button type="button" class="icon-btn hud-pause" id="btnPause" aria-label="Pause"><svg><use href="#i-pause"/></svg></button>
           <canvas class="minimap" id="minimap" aria-label="Track map"></canvas>
+          <div class="hud-popups" id="hudPopups" aria-live="polite"></div>
+        </div>
+        <div class="race-intro" id="raceIntro" hidden>
+          <span class="race-intro-badge" aria-hidden="true"><svg><use href="#i-flag"/></svg></span>
+          <div class="race-intro-text"><b id="raceIntroTitle">RACE</b><small id="raceIntroSub"></small></div>
         </div>
         <div class="hud-wrongway" id="hudWrongWay" hidden>WRONG WAY!</div>
-        <div class="hud-bottom">
-          <div class="hud-drift" id="hudDrift"><div class="drift-label">DRIFT <b id="hudDriftVal">0 m</b></div><div class="drift-bar"><i id="hudDriftFill"></i></div></div>
-          <div class="hud-speedo">
-            <svg class="speedo-svg" viewBox="0 0 200 200" aria-hidden="true">
-              <defs>
-                <linearGradient id="speedGrad" x1="0" y1="1" x2="1" y2="0">
-                  <stop offset="0" stop-color="#ffc533"/><stop offset=".6" stop-color="#ff9933"/><stop offset="1" stop-color="#ff3b2f"/>
-                </linearGradient>
-              </defs>
-              <circle class="speedo-bg" cx="100" cy="100" r="86"/>
-              <circle class="speedo-track" cx="100" cy="100" r="74" pathLength="100"/>
-              <circle class="speedo-ticks" cx="100" cy="100" r="88" pathLength="100"/>
-              <circle class="speedo-fill" id="speedArc" cx="100" cy="100" r="74" pathLength="100"/>
-            </svg>
-            <div class="speedo-read">
-              <div class="speed-num" id="hudSpeed">0</div>
-              <div class="speed-unit">KM/H</div>
-            </div>
-            <div class="gear" id="hudGear" aria-label="Gear">1</div>
-          </div>
-          <div class="hud-nitro" id="hudNitroWrap"><span>NITRO</span><div class="nitro-bar"><i id="hudNitro"></i></div></div>
-        </div>
+        <div class="speed-tag" id="speedTag" aria-hidden="true"><div class="speed-tag-in"><b id="speedTagNum">0</b><small>km/h</small></div></div>
+        <div class="hud-nitro" id="hudNitroWrap" aria-label="Nitro"><span class="hud-nitro-label">N<sub>2</sub>O</span><div class="nitro-bar"><i id="hudNitro"></i></div><kbd>SPACE</kbd></div>
         <div class="fps" id="fps" hidden>60 FPS</div>
       </section>
 
@@ -328,12 +314,10 @@
         <h2 id="settingsTitle" class="screen-title">SETTINGS</h2>
         <button type="submit" class="icon-btn" value="close" aria-label="Close settings"><svg><use href="#i-close"/></svg></button>
       </header>
-      <div class="setting"><span class="setting-label">GRAPHICS</span><div class="seg" id="segQuality" role="radiogroup" aria-label="Graphics quality"></div></div>
       <div class="setting"><span class="setting-label">SOUND</span><div class="seg" id="segSound" role="radiogroup" aria-label="Sound"></div></div>
       <div class="setting"><span class="setting-label"><label for="rngMusic">MUSIC</label></span><input type="range" id="rngMusic" class="range" min="0" max="1" step="0.05" value="0.5"></div>
       <div class="setting"><span class="setting-label">TOUCH</span><div class="seg" id="segTouch" role="radiogroup" aria-label="Touch controls"></div></div>
       <div class="setting"><span class="setting-label">SHOW FPS</span><div class="seg" id="segFps" role="radiogroup" aria-label="Show FPS"></div></div>
-      <p class="hint" id="qualityHint">Changing graphics quality reloads the game.</p>
       <button type="submit" class="btn btn-primary btn-lg" value="close">DONE</button>
     </form>
   </dialog>

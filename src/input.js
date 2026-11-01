@@ -27,8 +27,18 @@ function approach(cur, target, dt) {
   return cur + Math.sign(target - cur) * rate;
 }
 
-const SVG_LEFT = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 4.5L6.5 12l9 7.5z" fill="currentColor"/></svg>';
-const SVG_RIGHT = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 4.5l9 7.5-9 7.5z" fill="currentColor"/></svg>';
+// Double-chevron glyphs, drawn pointing right and rotated per button. A dark offset copy gives a crisp drop
+// shadow; the top copy is stroked with the shared saffron->pink gradient defined once in #touch.
+const CHEV = 'M5.2 5.6L11.6 12l-6.4 6.4M12.4 5.6L18.8 12l-6.4 6.4';
+const chevron = (rot) => `<svg class="tbtn-ico" viewBox="0 0 24 24" aria-hidden="true"><g transform="rotate(${rot} 12 12)">`
+  + `<path d="${CHEV}" class="chev-shadow" transform="translate(0 1.1)"/><path d="${CHEV}" class="chev"/></g></svg>`;
+const SVG_DEFS = '<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>'
+  + '<linearGradient id="la-chev" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffb347"/><stop offset=".5" stop-color="#ff7a4d"/><stop offset="1" stop-color="#ff4f9a"/></linearGradient>'
+  + '<linearGradient id="la-nos" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7df3ff"/><stop offset="1" stop-color="#29b6ff"/></linearGradient>'
+  + '</defs></svg>';
+const NOS_RING = '<svg class="nos-ring" viewBox="0 0 100 100" aria-hidden="true">'
+  + '<circle class="nos-track" cx="50" cy="50" r="45"/><circle class="nos-fill" cx="50" cy="50" r="45" pathLength="100"/></svg>';
+const TOUCH_KEYS = ['left', 'right', 'gas', 'brake', 'nitro', 'drift'];
 
 export class Input {
   constructor() {
@@ -120,61 +130,92 @@ export class Input {
     });
   }
 
+  /**
+   * Drive the N2O button's tank ring. Call every frame; it only touches the DOM when something visibly changes.
+   * @param {number} level01 nitro tank 0..1
+   * @param {boolean} active nitro currently burning
+   */
+  setNitro(level01, active) {
+    const n = this._nos;
+    if (!n) return;
+    const lv = Math.round(clamp(+level01 || 0, 0, 1) * 200) / 200; // 0.5% steps
+    if (lv !== n.level) {
+      n.level = lv;
+      n.fill.style.strokeDashoffset = (100 - lv * 100).toFixed(1);
+      const full = lv >= 0.995;
+      if (full !== n.full) { n.full = full; n.btn.classList.toggle('full', full); }
+      const empty = lv <= 0.01;
+      if (empty !== n.empty) { n.empty = empty; n.btn.classList.toggle('empty', empty); }
+    }
+    const on = !!active;
+    if (on !== n.active) { n.active = on; n.btn.classList.toggle('active', on); }
+  }
+
   _buildTouch() {
     if (this._touchEl) return;
     const root = document.createElement('div');
     root.id = 'touch';
     root.className = 'touch' + (this.tilt ? ' tilt' : '');
     root.setAttribute('aria-hidden', 'true');
-    const mk = (cls, key, html, label) => {
+    root.innerHTML = SVG_DEFS; // static markup only
+    const mk = (cls, key, html) => {
       const b = document.createElement('div'); // not a <button>: no focus, no click synthesis, no text selection
       b.className = 'tbtn ' + cls;
       b.dataset.k = key;
-      if (html) b.innerHTML = html; // static markup only
-      else b.textContent = label;
+      b.innerHTML = '<span class="tbtn-face">' + html + '</span>'; // static markup only; the face scales, the hit box never moves
       return b;
     };
-    const left = document.createElement('div');
-    left.className = 'touch-pad touch-left';
+    const steer = document.createElement('div');
+    steer.className = 'touch-pad touch-steer';
     const tiltHint = document.createElement('div');
     tiltHint.className = 'tilt-hint';
     tiltHint.textContent = 'TILT TO STEER';
-    left.append(mk('tbtn-steer', 'left', SVG_LEFT), mk('tbtn-steer', 'right', SVG_RIGHT), tiltHint);
-    const right = document.createElement('div');
-    right.className = 'touch-pad touch-right';
-    const c1 = document.createElement('div'); c1.className = 'touch-col';
-    c1.append(mk('tbtn-drift', 'drift', null, 'DRIFT'), mk('tbtn-brake', 'brake', null, 'BRAKE'));
-    const c2 = document.createElement('div'); c2.className = 'touch-col';
-    c2.append(mk('tbtn-nitro', 'nitro', null, 'NITRO'), mk('tbtn-gas', 'gas', null, 'GAS'));
-    right.append(c1, c2);
-    const horn = mk('tbtn-horn', 'horn', null, 'HORN');
-    root.append(left, right, horn);
+    steer.append(mk('tbtn-big tbtn-left', 'left', chevron(180)), mk('tbtn-big tbtn-right', 'right', chevron(0)), tiltHint);
+
+    const act = document.createElement('div');
+    act.className = 'touch-pad touch-act';
+    const drift = mk('tbtn-disc tbtn-drift', 'drift', '<span class="disc-label">DRIFT</span>');
+    const nitro = mk('tbtn-disc tbtn-nitro empty', 'nitro', NOS_RING + '<span class="disc-label">N<sub>2</sub>O</span>');
+    act.append(drift, nitro, mk('tbtn-big tbtn-brake', 'brake', chevron(90)), mk('tbtn-big tbtn-gas', 'gas', chevron(-90)));
+    root.append(steer, act);
     (document.getElementById('app') || document.body).appendChild(root);
     this._touchEl = root;
     this._btns = [...root.querySelectorAll('.tbtn')];
+    this._nos = { btn: nitro, fill: nitro.querySelector('.nos-fill'), level: -1, full: false, empty: true, active: false };
+    this.setNitro(0, false);
 
-    // Multi-touch: each pointer maps to whichever button it is over (fingers can slide between buttons)
+    // Multi-touch: each pointer maps to whichever button it is over (fingers can slide between buttons).
+    // Rects are measured on each pointerdown (6 reads, no writes) and reused for moves; only the inner face scales.
     this._pointers = new Map();
-    const hit = (x, y) => {
+    let rects = [];
+    const measure = () => {
+      rects = [];
       for (const b of this._btns) {
-        if (b.offsetParent === null) continue;
         const r = b.getBoundingClientRect();
-        const pad = 10;
-        if (x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad) return b.dataset.k;
+        if (r.width > 0) rects.push({ k: b.dataset.k, cx: r.left + r.width / 2, cy: r.top + r.height / 2, rad: r.width / 2 });
       }
-      return null;
+    };
+    const hit = (x, y) => {
+      // round buttons: nearest centre within radius + slop (steer buttons get extra slop so sliding L<->R never drops)
+      let best = null, bestD = Infinity;
+      for (const r of rects) {
+        const d = Math.hypot(x - r.cx, y - r.cy);
+        const slop = r.k === 'left' || r.k === 'right' ? 22 : 12;
+        if (d <= r.rad + slop && d - r.rad < bestD) { bestD = d - r.rad; best = r.k; }
+      }
+      return best;
     };
     const update = () => {
       const prev = { ...this.touch };
-      for (const k of ['left', 'right', 'gas', 'brake', 'nitro', 'drift', 'horn']) this.touch[k] = false;
+      for (const k of TOUCH_KEYS) this.touch[k] = false;
       for (const k of this._pointers.values()) if (k) this.touch[k] = true;
-      if (this.touch.horn && !prev.horn) this._edges.horn = true;
-      for (const k in this.touch) if (this.touch[k] && !prev[k] && navigator.vibrate) { try { navigator.vibrate(8); } catch { /* ignore */ } break; }
+      for (const k of TOUCH_KEYS) if (this.touch[k] && !prev[k] && navigator.vibrate) { try { navigator.vibrate(8); } catch { /* ignore */ } break; }
       this._syncTouchClasses();
     };
     this._syncTouchClasses = () => { for (const b of this._btns) b.classList.toggle('down', !!this.touch[b.dataset.k]); };
     const down = (e) => {
       if (this.tilt && !this._tiltGranted) this.setTilt(true); // iOS: permission prompt needs a gesture
+      measure();
       const k = hit(e.clientX, e.clientY);
       if (!k) return;
       e.preventDefault();

@@ -8,6 +8,7 @@ const RIVAL_NAMES = ['Jignesh', 'Hetal', 'Bhavin', 'Kinjal', 'Parth', 'Dhruvi', 
 const CAR_RADIUS = 0.8; // two circles per car, 0.9 m ahead/behind the centre
 const DHADAAK_MIN_CLOSING = 5; // m/s closing speed needed with nitro on
 const tmpV = new THREE.Vector3();
+const ECONOMY_OVERTAKE = 25; // points per place gained
 
 export function initials(name) {
   const parts = String(name || '?').trim().split(/\s+/).filter(Boolean);
@@ -129,18 +130,28 @@ export class Race {
       phys: new CarPhysics(o.stats || def.stats, o.nitroMul ?? def.nitroMul),
       lap: 0, half: false, lapStart: 0, bestLap: Infinity, lapTimes: [],
       finished: false, finishTime: null, place: 0, progress: 0,
-      wheelSpin: 0, driftMeters: 0, dhadaaks: 0, stuck: 0,
+      wheelSpin: 0, driftMeters: 0, dhadaaks: 0, stuck: 0, overtakes: 0, lastPlace: 0,
     };
     if (!o.isPlayer) {
       e.tag = makeNameTag(o.name, (o.mods && o.mods.paint) || def.paint, this.o.avatars?.get(o.pid));
       this.o.scene.add(e.tag);
+    } else {
+      // Glowing ring on the road under your own car, so you always spot yourself in the pack
+      const mat = new THREE.MeshBasicMaterial({ color: '#fff3b0', transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+      e.ring = new THREE.Mesh(new THREE.RingGeometry(2.05, 2.32, 64), mat);
+      e.ring.rotation.x = -Math.PI / 2;
+      e.ring.renderOrder = 2;
+      this.o.scene.add(e.ring);
     }
     this.cars.push(e);
     return e;
   }
 
   dispose() {
-    for (const c of this.cars) { this.o.scene.remove(c.model); disposeCarModel(c.model); disposeTag(this.o.scene, c.tag); }
+    for (const c of this.cars) {
+      this.o.scene.remove(c.model); disposeCarModel(c.model); disposeTag(this.o.scene, c.tag);
+      if (c.ring) { this.o.scene.remove(c.ring); c.ring.geometry.dispose(); c.ring.material.dispose(); }
+    }
     this.cars = [];
   }
 
@@ -207,7 +218,12 @@ export class Race {
       c.phys.step(dt, ctl, this.track);
       if (c.isPlayer && c.phys.nitroOn && !was) this.o.onEvent?.('nitro');
       if (c.isPlayer && c.phys.wallHit > 6) this.o.onEvent?.('wall', { power: Math.min(1, c.phys.wallHit / 25), pos: c.phys });
-      if (c.phys.drifting) c.driftMeters += c.phys.speed * dt;
+      if (c.phys.drifting) { c.driftMeters += c.phys.speed * dt; c.driftRun = (c.driftRun || 0) + c.phys.speed * dt; }
+      else if (c.driftRun) {
+        // A drift just ended: bank it as a popup if it was a proper one
+        if (c.isPlayer && c.driftRun > 25) this.o.onEvent?.('driftbank', { meters: Math.round(c.driftRun) });
+        c.driftRun = 0;
+      }
       this._laps(c);
       this._stuck(c, dt, ctl);
     }
@@ -364,6 +380,14 @@ export class Race {
       return pb - pa;
     });
     sorted.forEach((c, i) => { c.place = i + 1; });
+    // Overtakes: reward the player for climbing places (after a short settle at the start)
+    const me = this.me;
+    if (this.phase === 'racing' && this.time > 2 && !me.finished && me.lastPlace && me.place < me.lastPlace) {
+      const n = me.lastPlace - me.place;
+      me.overtakes += n;
+      this.o.onEvent?.('overtake', { count: n, points: n * ECONOMY_OVERTAKE });
+    }
+    me.lastPlace = me.place;
   }
 
   _syncModel(c, dt) {
@@ -383,6 +407,14 @@ export class Race {
     }
     if (u.brakeMat) u.brakeMat.emissiveIntensity = p.brake > 0.1 && v > 0.5 ? 2.5 : 0.35;
     if (u.halo) u.halo.position.y = (u.haloBase ??= u.halo.position.y) + Math.sin(performance.now() / 400) * 0.06;
+    if (c.ring) {
+      c.ring.position.set(p.x, y + 0.06, p.z);
+      const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 160);
+      c.ring.material.color.set(p.nitroOn ? '#7fe9ff' : p.drifting ? '#ffc533' : '#fff3b0');
+      c.ring.material.opacity = p.nitroOn ? 0.7 + pulse * 0.25 : 0.5;
+      const s = p.nitroOn ? 1.06 + pulse * 0.05 : 1;
+      c.ring.scale.set(s, s, s);
+    }
     if (c.tag) {
       // Float well above the roof; fade out when close so it never hides the car you are chasing
       c.tag.position.set(p.x, y + 2.75, p.z);
@@ -445,6 +477,7 @@ export class Race {
     rows.push(['Finish P' + place, ECONOMY.placePoints[Math.min(place, 8) - 1] || 80]);
     if (me.driftMeters > 10) rows.push(['Drift ' + Math.round(me.driftMeters) + ' m', Math.round(me.driftMeters * ECONOMY.driftPerMeter)]);
     if (me.dhadaaks) rows.push(['DHADAAAKK x' + me.dhadaaks, me.dhadaaks * ECONOMY.dhadaakBonus]);
+    if (me.overtakes) rows.push(['Overtakes x' + me.overtakes, me.overtakes * ECONOMY_OVERTAKE]);
     const total = rows.reduce((s, r) => s + r[1], 0);
     return { rows, total };
   }

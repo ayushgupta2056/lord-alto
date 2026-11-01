@@ -1,14 +1,42 @@
 // Procedural Web Audio for Lord Alto. No audio files: every sound is synthesised.
 // Safe to call any method before unlock(): they simply do nothing until the AudioContext exists.
+//
+// Mix (gains in dB, see dB()):  master (volume / mute) -> glue compressor -> brick-wall limiter -> out
+//   engBus  : engine tone + intake + whine/turbo + lift-off pops  (ducked under crashes)
+//   sfx     : skid, impacts, UI, stingers
+//   musicBus: menu garba loop
+//
+// Engine model (Maruti Alto, 3-cylinder 4-stroke, 5-speed):
+//   rpm is simulated here from speed01 + throttle (gears, upshift cut, downshift blip, launch slip,
+//   idle wobble, slew limited). One 4-stroke cycle = 2 crank turns = 3 firings, so the oscillators run
+//   at the CYCLE rate (rpm / 120) with a PeriodicWave built from 3 slightly uneven exhaust pulses per
+//   period: the firing rate (rpm / 60 * 1.5) and its harmonics dominate, the cycle-rate sub-harmonics
+//   give the lopey 3-pot thrum. Graph (12 nodes, all persistent):
+//     oscA + oscB(detuned) -> drive -> soft-clip -> lowpass -> engOut -> engBus
+//     noise -> intake bandpass -> AM (by oscB, pulses with each firing) -> intakeLvl -> engOut
+//     whine sine (gearbox, road speed; slides up into a turbo whistle on nitro) -> whineGain -> engBus
 
 const MUTE_KEY = 'lordalto.muted';
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v || 0);
-// Gear bands as fractions of top speed (5-speed Alto)
-const GEARS = [0, 0.15, 0.32, 0.52, 0.74, 1.01];
+const lerp = (a, b, k) => a + (b - a) * k;
+const dB = (db) => Math.pow(10, db / 20);
 const MUSIC_SCREENS = new Set(['menu', 'tracks', 'garage', 'mp', 'lobby', 'results']);
 const ENGINE_SCREENS = new Set(['race', 'pause']);
 
+// ---- engine tuning
+const IDLE_RPM = 900;
+const RED_RPM = 6800;
+const UPSHIFT_RPM = 6500;
+const MAX_RPM = 7000;
+// speed01 at which each gear would reach RED_RPM (short first gear, long fifth: 5th never hits the limiter)
+const GEAR_TOP = [0.13, 0.27, 0.45, 0.68, 1.05];
+const GEAR_CURVE = 1.2; // >1 widens each gear's rpm span (shift drops land ~2,700-4,000 rpm)
+const SHIFT_CUT = 0.08; // s of throttle cut on an upshift
+const SHIFT_GAP = 0.28; // min s between shifts
+const rpmInGear = (g, s) => RED_RPM * Math.pow(s / GEAR_TOP[g - 1], GEAR_CURVE);
+
 function readMuted() { try { return localStorage.getItem(MUTE_KEY) === '1'; } catch { return false; } }
+const nowS = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
 
 export class GameAudio {
   constructor() {
@@ -18,8 +46,17 @@ export class GameAudio {
     this._musicVol = 0.5;
     this._musicWanted = false;
     this._screen = null;
+    // engine simulation state (readable for debugging: _rpm, _gear)
     this._gear = 1;
-    this._dipUntil = 0;
+    this._rpm = IDLE_RPM;
+    this._nit = 0;
+    this._cutUntil = 0;
+    this._blipUntil = 0;
+    this._lastShift = 0;
+    this._engLast = 0;
+    this._onTime = 0;
+    this._engG = 0;
+    this._lpF = 400;
     if (typeof window !== 'undefined') {
       window.addEventListener('lordalto:music', (e) => this.setMusicVolume(e.detail?.volume));
       window.addEventListener('ui:screen', (e) => {
@@ -59,9 +96,12 @@ export class GameAudio {
     const c = this.ctx;
     this.master = c.createGain();
     this.master.gain.value = this._muted ? 0 : this.volume;
+    // glue compressor, then a fast brick-wall limiter as the anti-clip safety net (~ -1 dBFS ceiling)
     const comp = c.createDynamicsCompressor();
-    comp.threshold.value = -12; comp.knee.value = 10; comp.ratio.value = 5; comp.attack.value = 0.003; comp.release.value = 0.2;
-    this.master.connect(comp).connect(c.destination);
+    comp.threshold.value = -14; comp.knee.value = 8; comp.ratio.value = 4; comp.attack.value = 0.004; comp.release.value = 0.25;
+    const lim = c.createDynamicsCompressor();
+    lim.threshold.value = -3; lim.knee.value = 0; lim.ratio.value = 20; lim.attack.value = 0.001; lim.release.value = 0.08;
+    this.master.connect(comp).connect(lim).connect(c.destination);
     this.sfx = this._gain(1, this.master);
     this.engBus = this._gain(1, this.master);
     this.musicBus = this._gain(this._musicVol * 0.55, this.master);
@@ -90,30 +130,118 @@ export class GameAudio {
     for (let i = 0; i < 1024; i++) { const x = (i / 1023) * 2 - 1; curve[i] = Math.tanh(x * 3.2); }
     this.shaperCurve = curve;
 
-    // ---- engine: detuned saw + square (+ harmonic) -> lowpass -> gain
-    this.engFilter = c.createBiquadFilter();
-    this.engFilter.type = 'lowpass'; this.engFilter.frequency.value = 400; this.engFilter.Q.value = 3.5;
-    this.engGain = this._gain(0, this.engBus);
-    this.engFilter.connect(this.engGain);
-    const mk = (type, f, g) => { const o = c.createOscillator(); o.type = type; o.frequency.value = f; o.connect(this._gain(g, this.engFilter)); o.start(); return o; };
-    this.eo1 = mk('sawtooth', 40, 0.5);
-    this.eo2 = mk('square', 20, 0.28);
-    this.eo3 = mk('sawtooth', 80, 0.16);
-    // nitro / gearbox whine
-    this.whineGain = this._gain(0, this.engBus);
-    const wf = c.createBiquadFilter(); wf.type = 'bandpass'; wf.Q.value = 6; wf.frequency.value = 1500;
-    wf.connect(this.whineGain);
-    this.whine = c.createOscillator(); this.whine.type = 'sawtooth'; this.whine.frequency.value = 900; this.whine.connect(wf); this.whine.start();
-    this.whineFilter = wf;
+    // shared looping noise (engine intake + tyre squeal)
+    this.noiseLoop = c.createBufferSource();
+    this.noiseLoop.buffer = this.noiseBuf; this.noiseLoop.loop = true;
+    this.noiseLoop.start();
 
-    // ---- skid: looping noise -> bandpass
-    const skidSrc = c.createBufferSource();
-    skidSrc.buffer = this.noiseBuf; skidSrc.loop = true;
-    this.skidFilter = c.createBiquadFilter();
-    this.skidFilter.type = 'bandpass'; this.skidFilter.frequency.value = 2200; this.skidFilter.Q.value = 2.2;
+    this._buildEngine();
+    this._buildSkid();
+  }
+
+  /** PeriodicWave for one 4-stroke cycle of a 3-cylinder: 3 exhaust pulses, slightly uneven in size and timing. */
+  _engineWave(o) {
+    const M = 1024, H = 96, TAU = Math.PI * 2;
+    const x = new Float32Array(M);
+    for (let cyl = 0; cyl < 3; cyl++) {
+      const start = cyl / 3 + o.jitter[cyl];
+      for (let n = 0; n < M; n++) {
+        let ph = n / M - start; ph -= Math.floor(ph);
+        const u = ph * 3; // time since this cylinder fired, in firing intervals (0..3)
+        const env = (1 - Math.exp(-u / o.attack)) * Math.exp(-u / o.decay);
+        x[n] += o.amps[cyl] * env * (Math.sin(TAU * 0.9 * u) + o.ring * Math.sin(TAU * o.ringF * u));
+      }
+    }
+    const cosT = new Float32Array(M), sinT = new Float32Array(M);
+    for (let n = 0; n < M; n++) { cosT[n] = Math.cos(TAU * n / M); sinT[n] = Math.sin(TAU * n / M); }
+    const re = new Float32Array(H + 1), im = new Float32Array(H + 1);
+    for (let k = 1; k <= H; k++) {
+      let a = 0, b = 0;
+      for (let n = 0, idx = 0; n < M; n++, idx = (idx + k) % M) { a += x[n] * cosT[idx]; b += x[n] * sinT[idx]; }
+      const taper = 1 - 0.55 * (k / H); // soften the very top so the raw wave is not fizzy
+      re[k] = (a * 2 / M) * taper; im[k] = (b * 2 / M) * taper;
+    }
+    // normalise the band-limited result ourselves so the two layers can sit at different levels
+    let peak = 1e-6;
+    for (let n = 0; n < M; n += 2) {
+      let v = 0;
+      for (let k = 1, idx = 0; k <= H; k++) { idx = (idx + n) % M; v += re[k] * cosT[idx] + im[k] * sinT[idx]; }
+      peak = Math.max(peak, Math.abs(v));
+    }
+    const sc = o.level / peak;
+    for (let k = 1; k <= H; k++) { re[k] *= sc; im[k] *= sc; }
+    return this.ctx.createPeriodicWave(re, im, { disableNormalization: true });
+  }
+
+  _buildEngine() {
+    const c = this.ctx;
+    // tone: two detuned pulse-train layers -> drive -> asymmetric soft clip -> lowpass -> out
+    this.engOut = this._gain(0, this.engBus);
+    this.engLP = this._filter('lowpass', 400, 0.9);
+    this.engLP.connect(this.engOut);
+    this.engShaper = c.createWaveShaper();
+    const N = 2048, K = 4, bias = 0.06, sc = new Float32Array(N);
+    let mx = 0;
+    for (let i = 0; i < N; i++) {
+      const x = (i / (N - 1)) * 2 - 1;
+      sc[i] = Math.tanh(K * (x + bias)) - Math.tanh(K * bias);
+      mx = Math.max(mx, Math.abs(sc[i]));
+    }
+    for (let i = 0; i < N; i++) sc[i] /= mx;
+    this.engShaper.curve = sc;
+    this.engShaper.oversample = '2x';
+    this.engShaper.connect(this.engLP);
+    this.engDrive = this._gain(0.1, this.engShaper);
+    const mkOsc = (wave, detune) => {
+      const o = c.createOscillator();
+      o.setPeriodicWave(wave); o.frequency.value = IDLE_RPM / 120; o.detune.value = detune;
+      o.connect(this.engDrive); o.start();
+      return o;
+    };
+    // A: round, thumpy main voice. B: rasp layer (shorter, ringier pulses), quieter and detuned for width
+    this.eoA = mkOsc(this._engineWave({ amps: [1, 0.86, 0.94], jitter: [0, 0.011, -0.007], attack: 0.012, decay: 0.17, ring: 0.38, ringF: 4.5, level: 1 }), 0);
+    this.eoB = mkOsc(this._engineWave({ amps: [0.92, 1, 0.83], jitter: [0, -0.009, 0.013], attack: 0.006, decay: 0.07, ring: 0.75, ringF: 7.2, level: 0.55 }), 7);
+
+    // intake roar: resonant band of noise, amplitude-modulated by the firing pulses (oscB)
+    this.intakeBP = this._filter('bandpass', 600, 2.5);
+    this.intakeAM = this._gain(0.25, null);
+    this.intakeLvl = this._gain(0, this.engOut);
+    this.eoB.connect(this.intakeAM.gain);
+    this.noiseLoop.connect(this.intakeBP).connect(this.intakeAM).connect(this.intakeLvl);
+
+    // gearbox whine (road speed) that slides into a turbo whistle on nitro
+    this.whineGain = this._gain(0, this.engBus);
+    this.whine = c.createOscillator(); this.whine.type = 'sine'; this.whine.frequency.value = 600;
+    this.whine.connect(this.whineGain); this.whine.start();
+
+    // lift-off pop / crackle one-shot sample (thump + crack, lightly smoothed)
+    const sr = c.sampleRate, pl = Math.floor(sr * 0.09);
+    this.popBuf = c.createBuffer(1, pl, sr);
+    const p = this.popBuf.getChannelData(0);
+    let y = 0, pk = 1e-6;
+    for (let i = 0; i < pl; i++) {
+      const tt = i / sr;
+      const body = Math.sin(2 * Math.PI * (85 - 250 * tt) * tt) * Math.exp(-tt / 0.016);
+      const crack = (Math.random() * 2 - 1) * Math.exp(-tt / 0.004);
+      const tail = Math.random() < 0.12 ? (Math.random() * 2 - 1) * Math.exp(-tt / 0.025) * 0.6 : 0;
+      y += (body * 0.9 + crack + tail - y) * 0.5;
+      p[i] = y; pk = Math.max(pk, Math.abs(y));
+    }
+    for (let i = 0; i < pl; i++) p[i] /= pk;
+  }
+
+  _buildSkid() {
+    const c = this.ctx;
+    // tyre squeal: narrow resonant band of noise + a quiet tonal squeal through the same band, plus broadband scrub
     this.skidGain = this._gain(0, this.sfx);
-    skidSrc.connect(this.skidFilter).connect(this.skidGain);
-    skidSrc.start();
+    this.skidBP = this._filter('bandpass', 1000, 7);
+    this.skidBP.connect(this.skidGain);
+    this.noiseLoop.connect(this.skidBP);
+    this.skidScrub = this._filter('bandpass', 2600, 0.9);
+    this.noiseLoop.connect(this.skidScrub).connect(this._gain(0.3, this.skidGain));
+    this.skidToneG = this._gain(0, this.skidBP);
+    this.skidTone = c.createOscillator(); this.skidTone.type = 'sawtooth'; this.skidTone.frequency.value = 1000;
+    this.skidTone.connect(this.skidToneG); this.skidTone.start();
   }
 
   // ------------------------------------------------------------------ mute
@@ -124,59 +252,161 @@ export class GameAudio {
   }
   get muted() { return this._muted; }
 
+  _active() { return this._screen == null || ENGINE_SCREENS.has(this._screen) ? 1 : 0; }
+
   // ------------------------------------------------------------------ continuous
   engine(speed01, throttle, nitro) {
     if (!this.ctx) return;
-    const c = this.ctx, t = c.currentTime;
+    const t = this.ctx.currentTime;
+    const now = nowS();
+    let dt = this._engLast ? now - this._engLast : 0;
+    this._engLast = now;
+    if (!(dt > 0)) dt = 0; else if (dt > 0.1) dt = 0.1;
     const s = clamp01(Math.abs(speed01)), th = clamp01(throttle);
-    const n = nitro ? (typeof nitro === 'number' ? clamp01(nitro) : 1) : 0;
-    let g = 1;
-    while (g < 5 && s > GEARS[g]) g++;
-    const lo = GEARS[g - 1], hi = GEARS[g];
-    const frac = Math.min(1, (s - lo) / (hi - lo));
-    let rpm = g === 1 ? 0.17 + 0.83 * frac : 0.46 + 0.54 * frac;
-    if (s < 0.04) rpm = Math.max(rpm, 0.17 + th * 0.55); // free revving at standstill
-    if (g > this._gear) this._dipUntil = t + 0.09; // throttle lift on upshift
+    const nIn = nitro ? (typeof nitro === 'number' ? clamp01(nitro) : 1) : 0;
+    const active = this._active();
+
+    // turbo spool: quick up, slower down
+    this._nit += (nIn - this._nit) * Math.min(1, dt * (nIn > this._nit ? 5 : 2.2));
+    const nit = this._nit;
+
+    // ---- gearbox
+    let g = this._gear, upshift = false;
+    // sudden speed jumps (crash, respawn, dropped frames): skip gears instead of shifting one at a time
+    while (g > 1 && rpmInGear(g, s) < 1100) g--;
+    while (g < 5 && rpmInGear(g, s) > 8500) g++;
+    if (now - this._lastShift > SHIFT_GAP) {
+      if (g < 5 && rpmInGear(g, s) > UPSHIFT_RPM) {
+        g++; upshift = true;
+        this._cutUntil = now + SHIFT_CUT; this._lastShift = now;
+      } else if (g > 1 && rpmInGear(g, s) < (th > 0.5 ? 2300 : 1950) && rpmInGear(g - 1, s) < 6000) {
+        g--; this._lastShift = now; this._blipUntil = now + 0.12; // rev-matching blip
+      }
+    }
     this._gear = g;
-    rpm *= 1 + n * 0.08;
-    const f = 30 + rpm * 128;
-    this.eo1.frequency.setTargetAtTime(f, t, 0.045);
-    this.eo2.frequency.setTargetAtTime(f * 0.503, t, 0.045);
-    this.eo3.frequency.setTargetAtTime(f * 2.012, t, 0.045);
-    this.engFilter.frequency.setTargetAtTime(240 + rpm * 1500 + th * 900 + n * 900, t, 0.05);
-    const active = this._screen == null || ENGINE_SCREENS.has(this._screen) ? 1 : 0;
-    let gain = (0.06 + th * 0.09 + s * 0.045 + n * 0.03) * active;
-    if (t < this._dipUntil) gain *= 0.35;
-    this.engGain.gain.setTargetAtTime(gain, t, t < this._dipUntil ? 0.012 : 0.05);
-    this.whine.frequency.setTargetAtTime(600 + s * 1900 + n * 700, t, 0.08);
-    this.whineFilter.frequency.setTargetAtTime(900 + s * 2200 + n * 900, t, 0.08);
-    this.whineGain.gain.setTargetAtTime((0.004 + s * 0.012 + n * 0.06) * active, t, 0.08);
+    const cut = now < this._cutUntil;
+    const thE = cut ? 0 : th;
+
+    // ---- rpm target
+    let target = Math.max(IDLE_RPM, rpmInGear(g, s));
+    if (g === 1) { // clutch slip: free revving at a standstill, launch rpm held (with a slight bite sag) until the gear catches up
+      const k = clamp01(s / 0.1);
+      target = Math.max(target, (IDLE_RPM + th * 3800) * (1 - 0.15 * k));
+    }
+    target += nit * 350 * (0.4 + 0.6 * thE);
+    const idleK = clamp01((1500 - target) / 600);
+    if (idleK > 0) target += (32 * Math.sin(now * 3.9) + 16 * Math.sin(now * 11.3 + 1)) * idleK;
+    target = Math.min(MAX_RPM, target);
+    // slew limiter: never jumps, except the fast drop through an upshift and the downshift blip
+    const up = now < this._blipUntil ? 30000 : 3500 + th * 9000 + nit * 4000;
+    const down = cut ? 50000 : 6500;
+    const dr = target - this._rpm;
+    this._rpm += dr > 0 ? Math.min(dr, up * dt) : Math.max(dr, -down * dt);
+    const rpm = this._rpm;
+    const rN = clamp01((rpm - IDLE_RPM) / (RED_RPM - IDLE_RPM));
+
+    // ---- tone
+    const f0 = rpm / 120; // 4-stroke cycle rate; firing rate = 3 * f0 = rpm / 60 * 1.5
+    this.eoA.frequency.setTargetAtTime(f0, t, 0.018);
+    this.eoB.frequency.setTargetAtTime(f0, t, 0.018);
+    const fast = cut ? 0.012 : 0.03;
+    this.engDrive.gain.setTargetAtTime(0.1 + thE * 0.22 + rN * 0.05 + nit * 0.12, t, fast);
+    // on throttle: open, bright, a little nasal resonance. off throttle: muffled
+    const lpF = lerp(200 + rpm * 0.14, 500 + rpm * 0.62, thE) + nit * 900;
+    this.engLP.frequency.setTargetAtTime(lpF, t, lpF > this._lpF ? fast : 0.05);
+    this.engLP.Q.setTargetAtTime(0.8 + thE * 1.0 + nit * 0.4, t, 0.05);
+    this._lpF = lpF;
+    let gEng = lerp(dB(-24 + 6 * rN), dB(-15 + 5 * rN), thE) * (1 + nit * 0.19);
+    if (now < this._blipUntil) gEng *= 1.15;
+    gEng *= active;
+    this.engOut.gain.setTargetAtTime(gEng, t, cut ? 0.012 : gEng > this._engG ? 0.025 : 0.06);
+    this._engG = gEng;
+
+    // ---- intake roar (rises with load) -> turbo whoosh on nitro
+    const load = thE * (0.35 + 0.65 * rN);
+    this.intakeBP.frequency.setTargetAtTime((320 + rpm * 0.3) * (1 + 1.3 * nit), t, 0.04);
+    this.intakeBP.Q.setTargetAtTime(2.5 + nit * 2, t, 0.08);
+    this.intakeAM.gain.setTargetAtTime(0.25 + nit * 0.5, t, 0.08);
+    this.intakeLvl.gain.setTargetAtTime(0.1 + 1.9 * load + nit * 1.2, t, fast);
+
+    // ---- gearbox whine (road speed) / turbo whistle (boost)
+    const wf = lerp(420 + s * 2300, 3000 + rN * 2800, nit) * (1 + 0.004 * Math.sin(now * 31));
+    this.whine.frequency.setTargetAtTime(wf, t, 0.06);
+    const wg = (s > 0.01 ? dB(-50 + 14 * s) : 0) + nit * dB(-30) * (0.5 + 0.5 * thE);
+    this.whineGain.gain.setTargetAtTime(wg * active, t, 0.08);
+
+    // ---- pops & crackle: on lift-off after a pull, sometimes on a hard upshift, light overrun burble
+    if (active) {
+      if (upshift && th > 0.7 && rpm > 5000 && Math.random() < 0.45) this._pop(t + 0.012, 0.6);
+      if (th > 0.6) this._onTime += dt;
+      else if (th < 0.15) {
+        if (this._onTime > 0.3 && rpm > 3200) this._pops(t, 2 + Math.floor(Math.random() * 4), rN);
+        this._onTime = 0;
+        if (rpm > 3000 && s > 0.2 && Math.random() < dt * 1.5) this._pop(t + 0.01, 0.25 + Math.random() * 0.25);
+      }
+    }
+
     clearTimeout(this._engTO);
     this._engTO = setTimeout(() => this._silenceEngine(), 300);
+  }
+
+  _pops(t, count, k) {
+    let tt = t + 0.03;
+    for (let i = 0; i < count; i++) {
+      this._pop(tt, (0.35 + Math.random() * 0.5) * (0.6 + 0.4 * k));
+      tt += 0.04 + Math.random() * 0.1;
+    }
+  }
+
+  _pop(t, vol) {
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.popBuf;
+    src.playbackRate.value = 0.75 + Math.random() * 0.6;
+    src.connect(this._gain(vol * 0.22, this.engBus));
+    src.start(t);
   }
 
   _silenceEngine() {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
-    this.engGain.gain.setTargetAtTime(0, t, 0.08);
+    this.engOut.gain.setTargetAtTime(0, t, 0.08);
     this.whineGain.gain.setTargetAtTime(0, t, 0.08);
     this.skidGain.gain.setTargetAtTime(0, t, 0.05);
+    this._engG = 0;
+    this._onTime = 0;
   }
 
   skid(amount01) {
     if (!this.ctx) return;
-    const a = clamp01(amount01), t = this.ctx.currentTime;
-    const active = this._screen == null || ENGINE_SCREENS.has(this._screen) ? 1 : 0;
-    this.skidGain.gain.setTargetAtTime(a * a * 0.3 * active, t, 0.04);
-    this.skidFilter.frequency.setTargetAtTime(1700 + a * 1500, t, 0.05);
+    const a = clamp01(amount01), t = this.ctx.currentTime, now = nowS();
+    const active = this._active();
+    // rubber: pitch wobbles (two slow LFOs + jitter) and the level chatters slightly
+    const wob = 1 + 0.03 * Math.sin(now * 33.3) + 0.018 * Math.sin(now * 79.1 + 1.3) + (Math.random() - 0.5) * 0.016;
+    const f = (820 + a * 520) * wob;
+    this.skidBP.frequency.setTargetAtTime(f, t, 0.025);
+    this.skidTone.frequency.setTargetAtTime(f * 0.995, t, 0.025);
+    this.skidScrub.frequency.setTargetAtTime(2200 + a * 1400, t, 0.05);
+    const tone = clamp01((a - 0.25) / 0.75);
+    this.skidToneG.gain.setTargetAtTime(0.05 * tone * tone, t, 0.05);
+    const chatter = 1 + 0.18 * Math.sin(now * 49.6);
+    this.skidGain.gain.setTargetAtTime(a * a * 0.9 * chatter * active, t, 0.035);
     clearTimeout(this._skidTO);
     this._skidTO = setTimeout(() => { if (this.ctx) this.skidGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05); }, 300);
+  }
+
+  /** Briefly dip the engine bus so an impact cuts through (sidechain-style ducking). */
+  _duck(db, release) {
+    const g = this.engBus.gain, t = this.ctx.currentTime;
+    g.cancelScheduledValues(t);
+    g.setTargetAtTime(dB(db), t, 0.008);
+    g.setTargetAtTime(1, t + 0.12, release);
   }
 
   // ------------------------------------------------------------------ one-shots
   crash(power01) {
     if (!this.ctx) return;
     const p = clamp01(power01 ?? 0.5), t = this.ctx.currentTime + 0.005;
+    this._duck(-3 - 5 * p, 0.2);
     const nz = this._noise(t, 0.3);
     const lp = this._filter('lowpass', 2400, 0.7);
     lp.frequency.setValueAtTime(2400, t);
@@ -188,6 +418,7 @@ export class GameAudio {
   dhadaak() {
     if (!this.ctx) return;
     const c = this.ctx, t = c.currentTime + 0.01;
+    this._duck(-10, 0.45);
     const out = this._gain(0.95, this.sfx);
     const wet = this._gain(0.55, this.verbSend);
     // 1) huge low boom through soft clipping
@@ -265,15 +496,35 @@ export class GameAudio {
 
   nitroStart() {
     if (!this.ctx) return;
-    const t = this.ctx.currentTime + 0.005;
-    const nz = this._noise(t, 0.8);
-    const bp = this._filter('bandpass', 300, 1.3);
-    bp.frequency.setValueAtTime(300, t);
-    bp.frequency.exponentialRampToValueAtTime(2800, t + 0.38);
-    nz.connect(bp).connect(this._env(t, 0.5, 0.02, 0.7, this.sfx));
-    const nz2 = this._noise(t, 0.5);
-    nz2.connect(this._filter('highpass', 5000, 0.7)).connect(this._env(t, 0.16, 0.005, 0.45, this.sfx));
-    this._sweep('sine', 90, 50, t, 0.3, 0.5, this.sfx);
+    const c = this.ctx, t = c.currentTime + 0.005;
+    this._nit = Math.max(this._nit, 0.5); // kick the engine's turbo spool immediately
+    // 1) punch: short low thump
+    this._sweep('sine', 125, 46, t, 0.26, 0.55, this.sfx, 0.002, 0.18);
+    // 2) blow-off "pssh-tu-tu": bright noise with a decaying valve flutter
+    const nz = this._noise(t, 0.42);
+    const hp = this._filter('highpass', 1600, 0.8);
+    const fl = c.createGain(); fl.gain.value = 0.55;
+    const lfo = c.createOscillator(); lfo.type = 'square';
+    lfo.frequency.setValueAtTime(34, t); lfo.frequency.linearRampToValueAtTime(17, t + 0.32);
+    const lfoD = c.createGain();
+    lfoD.gain.setValueAtTime(0.45, t); lfoD.gain.exponentialRampToValueAtTime(0.01, t + 0.34);
+    lfo.connect(lfoD).connect(fl.gain);
+    lfo.start(t); lfo.stop(t + 0.45);
+    nz.connect(hp).connect(fl).connect(this._env(t, 0.34, 0.003, 0.32, this.sfx));
+    // 3) rising whoosh as the boost comes in
+    const t2 = t + 0.03;
+    const wz = this._noise(t2, 0.9);
+    const bp = this._filter('bandpass', 380, 1.6);
+    bp.frequency.setValueAtTime(380, t2);
+    bp.frequency.exponentialRampToValueAtTime(3400, t2 + 0.52);
+    const wg = c.createGain();
+    wg.gain.setValueAtTime(0.0001, t2);
+    wg.gain.linearRampToValueAtTime(0.5, t2 + 0.3);
+    wg.gain.exponentialRampToValueAtTime(0.0001, t2 + 0.88);
+    wz.connect(bp).connect(wg).connect(this.sfx);
+    wg.connect(this._gain(0.3, this.verbSend));
+    // 4) turbo whistle chirp
+    this._sweep('sine', 2400, 5600, t + 0.05, 0.6, 0.035, this.sfx, 0.08, 0.5);
   }
 
   countdown(final) {

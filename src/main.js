@@ -13,20 +13,24 @@ import { GameAudio } from './audio.js';
 import { UI } from './ui.js';
 import { Net, roomFromUrl } from './net.js';
 import { openSelfie, savedSelfie } from './selfie.js';
+import { SpeedLines } from './speedfx.js';
 
 const profile = new Profile();
 const settings = profile.d.settings;
+// Always render at full quality (high-res shadows, dense scenery, antialiasing) on every device
+const QUALITY = 'high';
+settings.quality = QUALITY;
 const canvas = document.getElementById('game');
 
 // ---------- renderer ----------
 let renderer;
 function makeRenderer() {
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: settings.quality !== 'low', powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, settings.quality === 'high' ? 2 : settings.quality === 'medium' ? 1.5 : 1));
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
-  renderer.shadowMap.enabled = settings.quality !== 'low';
+  renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 }
 makeRenderer();
@@ -126,11 +130,10 @@ const ui = new UI({
   onQuit: () => { paused = false; if (mpRace) { net.leave(); } endRace(); go('menu'); },
   onRaceAgain: () => { if (mpRace) { endRace(); go('lobby'); } else startSingle(); },
   onSettings: s => {
-    const qualityChanged = s.quality && s.quality !== settings.quality;
-    Object.assign(settings, s); profile.save();
+    const { quality, ...rest } = s || {}; // graphics are always high; ignore any old quality setting
+    Object.assign(settings, rest); profile.save();
     if (s.muted != null) audio.setMuted(s.muted);
     input.setTouch(wantTouch());
-    if (qualityChanged) location.reload();
   },
   onReady: () => { audio.unlock(); go('menu'); if (pendingPin) { ui.prefillName?.(profile.d.name || ''); go('mp'); ui.prefillPin?.(pendingPin); ui.toast(`Enter your name and join room ${pendingPin}`); } },
   onPause: () => { if (screen === 'race') { paused = !mpRace; go('pause'); } },
@@ -172,8 +175,8 @@ function go(s) {
 function loadTrack(id, timeOfDay) {
   const def = TRACKS.find(t => t.id === id) || TRACKS[0];
   track = buildTrack(def);
-  world.load(track, { timeOfDay: timeOfDay || def.timeOfDay, quality: settings.quality });
-  fx = new FX(world.scene, settings.quality); // world.load() clears the scene, so particles are rebuilt per track
+  world.load(track, { timeOfDay: timeOfDay || def.timeOfDay, quality: QUALITY });
+  fx = new FX(world.scene, QUALITY); // world.load() clears the scene, so particles are rebuilt per track
   return def;
 }
 
@@ -185,20 +188,22 @@ function playerOpts() {
 function startSingle() {
   endRace();
   mpRace = false;
-  loadTrack(raceSettings.track, raceSettings.timeOfDay);
-  race = new Race({ scene: world.scene, track, fx, laps: raceSettings.laps, difficulty: DIFFICULTY[raceSettings.difficulty] || 0.95, player: playerOpts(), rivals: 7, shadows: settings.quality !== 'low', onEvent: onRaceEvent });
+  const def = loadTrack(raceSettings.track, raceSettings.timeOfDay);
+  race = new Race({ scene: world.scene, track, fx, laps: raceSettings.laps, difficulty: DIFFICULTY[raceSettings.difficulty] || 0.95, player: playerOpts(), rivals: 7, shadows: true, onEvent: onRaceEvent });
   startCamera();
   go('race');
+  ui.raceIntro?.('RACE · ' + def.name, def.tagline);
 }
 
 function startMulti(p) {
   endRace();
   mpRace = true;
-  loadTrack(p.track, p.timeOfDay);
+  const def = loadTrack(p.track, p.timeOfDay);
   const room = net.room;
-  race = new Race({ scene: world.scene, track, fx, laps: p.laps, difficulty: 1, player: playerOpts(), net, grid: p.grid, players: room.players, startAt: p.startAt, avatars, shadows: settings.quality !== 'low', onEvent: onRaceEvent });
+  race = new Race({ scene: world.scene, track, fx, laps: p.laps, difficulty: 1, player: playerOpts(), net, grid: p.grid, players: room.players, startAt: p.startAt, avatars, shadows: true, onEvent: onRaceEvent });
   startCamera();
   go('race');
+  ui.raceIntro?.('RACE · ' + def.name, def.tagline);
   ui.banner('Waiting for everyone to load…', 'info');
   net.loaded();
 }
@@ -211,7 +216,7 @@ function endRace() {
 let lastCount = null;
 function onRaceEvent(type, d) {
   switch (type) {
-    case 'go': ui.countdown(0); audio.countdown(true); setTimeout(() => ui.countdown(null), 900); break;
+    case 'go': ui.countdown(0); ui.raceIntro?.(null); audio.countdown(true); setTimeout(() => ui.countdown(null), 900); break;
     case 'nitro': audio.nitroStart(); break;
     case 'lap': ui.banner(d.lap === d.laps ? 'FINAL LAP!' : `LAP ${d.lap}/${d.laps}`, 'info'); audio.lapDing(); break;
     case 'wall': if (d.power > 0.25) { audio.crash(d.power * 0.6); shake = Math.max(shake, d.power * 0.3); } break;
@@ -229,7 +234,7 @@ function onRaceEvent(type, d) {
       // Hit-stop: a brief near-freeze sells the impact (single-player only, so online clocks stay in sync)
       if (d.mine && !mpRace) hitStopUntil = performance.now() + 110;
       if (d.pos) { fx.sparks(new THREE.Vector3(d.pos.x, 0.6, d.pos.z), 40); }
-      if (d.byMe) profile.d.dhadaaks++;
+      if (d.byMe) { profile.d.dhadaaks++; ui.popup?.('+75 DHADAAAKK', 'dhadaak'); }
       break;
     }
     case 'finish':
@@ -240,6 +245,8 @@ function onRaceEvent(type, d) {
       }
       break;
     case 'respawn': ui.toast('Back on the road'); break;
+    case 'overtake': ui.popup?.(`+${d.points} ${d.count > 1 ? (d.count === 2 ? 'DOUBLE ' : 'TRIPLE ') : ''}OVERTAKE`, 'good'); break;
+    case 'driftbank': ui.popup?.(`+${d.meters} m DRIFT`, 'nitro'); break;
   }
 }
 
@@ -297,20 +304,30 @@ function startCamera() {
   camLook.set(p.x, 1, p.z);
   camera.position.copy(camPos); camera.lookAt(camLook);
 }
+let camSpeed = 0, camThrust = 0;
 function updateCamera(dt) {
   const p = race.me.phys;
   const v = Math.abs(p.forwardSpeed);
-  // Portrait screens are narrow, so sit further back and higher to see the road ahead
+  // Low, close chase cam (sells speed). Portrait screens are narrow, so sit a bit further back and higher.
   const portrait = camera.aspect < 1;
-  const back = (portrait ? 8.6 : 6.2) + v * 0.045, up = (portrait ? 3.6 : 2.35) + v * 0.012;
+  // Thrust: the camera lags back when you accelerate or hit nitro, and settles in when you brake
+  const accel = (v - camSpeed) / Math.max(dt, 1e-3); camSpeed = v;
+  camThrust += (THREE.MathUtils.clamp(accel * 0.05 + (p.nitroOn ? 0.9 : 0), -0.5, 1.4) - camThrust) * Math.min(1, dt * 3);
+  const back = (portrait ? 6.6 : 5.0) + v * 0.035 + camThrust, up = (portrait ? 2.45 : 1.7) + v * 0.007;
   const fx_ = Math.sin(p.h), fz = Math.cos(p.h);
   const y = track.y ? track.y[p.index] || 0 : 0;
   const tx = p.x - fx_ * back, tz = p.z - fz * back;
-  const k = 1 - Math.exp(-dt * 6);
+  const k = 1 - Math.exp(-dt * 7.5);
   camPos.x += (tx - camPos.x) * k; camPos.z += (tz - camPos.z) * k; camPos.y += (y + up - camPos.y) * k;
-  camLook.set(p.x + fx_ * (portrait ? 6 : 3), y + (portrait ? 0.4 : 1.0), p.z + fz * (portrait ? 6 : 3));
+  const ahead = portrait ? 7 : 4.5;
+  camLook.set(p.x + fx_ * ahead, y + (portrait ? 0.55 : 0.95), p.z + fz * ahead);
   camera.position.copy(camPos);
   camera.lookAt(camLook);
+  // Road rumble at high speed: a faint constant buzz on top of impact shake
+  if (v > 28) {
+    const t = performance.now() / 1000, a = Math.min(1, (v - 28) / 30) * (p.nitroOn ? 0.035 : 0.018);
+    camera.position.y += Math.sin(t * 61.7) * a; camera.position.x += Math.sin(t * 47.3 + 1.1) * a;
+  }
   if (shake > 0) {
     // Trauma shake: amplitude = trauma^2 (light bumps barely move, DHADAAAKK punches), smooth noise, decays to rest
     const s = shake * shake, t = performance.now() / 1000;
@@ -319,8 +336,47 @@ function updateCamera(dt) {
     camera.rotation.z += Math.sin(t * 29.9 + 0.4) * s * 0.06;
     shake = Math.max(0, shake - dt * 1.4);
   }
-  const fov = (portrait ? 74 : 62) + Math.min(10, v * 0.12) + (p.nitroOn ? 8 : 0);
-  camera.fov += (fov - camera.fov) * Math.min(1, dt * 4); camera.updateProjectionMatrix();
+  // FOV opens up with speed and punches out on nitro: the main "going fast" cue
+  const fov = (portrait ? 70 : 58) + Math.min(16, Math.max(0, v - 8) * 0.38) + (p.nitroOn ? 11 : 0);
+  camera.fov += (fov - camera.fov) * Math.min(1, dt * (fov > camera.fov ? 5 : 2.5)); camera.updateProjectionMatrix();
+}
+
+// ---------- menu scene: your Alto parked on the real Vadodara street (outside Bright Day School) ----------
+let menuCar = null, menuCarKey = '', menuSpot = null;
+const menuCam = new THREE.PerspectiveCamera(42, 1, 0.1, 2500);
+function ensureMenuCar() {
+  if (!track) return false;
+  const id = profile.d.selected, mods = profile.mods(id);
+  const key = id + '|' + track.id;
+  if (!menuCar || menuCarKey !== key || menuCar.parent !== world.scene) {
+    if (menuCar) { menuCar.parent?.remove(menuCar); disposeCarModel(menuCar); }
+    menuCar = buildCarModel(id, mods);
+    menuCar.traverse(o => { if (o.isMesh) o.castShadow = true; });
+    const lm = track.landmarks.find(l => l.id === 'brightday') || track.landmarks[0];
+    const i = ((lm ? lm.index : 30) + 52) % track.N; // a little up the road, away from the start gantry
+    menuSpot = { x: track.x[i], z: track.z[i], y: track.y[i] || 0, h: Math.atan2(track.tx[i], track.tz[i]) };
+    menuCar.position.set(menuSpot.x, menuSpot.y, menuSpot.z);
+    menuCar.rotation.y = menuSpot.h;
+    world.scene.add(menuCar);
+    menuCarKey = key;
+  } else applyMods(menuCar, mods);
+  return true;
+}
+function hideMenuCar() { if (menuCar) menuCar.parent?.remove(menuCar); }
+function renderMenu(dt, t) {
+  if (!ensureMenuCar()) return false;
+  const s = menuSpot, portrait = innerWidth < innerHeight;
+  const fx_ = Math.sin(s.h), fz = Math.cos(s.h), rx = Math.cos(s.h), rz = -Math.sin(s.h);
+  // Front three-quarter view with a gentle drift; on phones frame the car in the gap between title and card
+  const sway = Math.sin(t * 0.25) * 0.6;
+  const dist = portrait ? 9.5 : 7.2;
+  menuCam.position.set(s.x + fx_ * dist + rx * (2.6 + sway), s.y + (portrait ? 2.2 : 1.6), s.z + fz * dist + rz * (2.6 + sway));
+  menuCam.lookAt(s.x - rx * (portrait ? 0 : 1.6), s.y + (portrait ? 1.9 : 0.8), s.z - rz * (portrait ? 0 : 1.6));
+  menuCam.aspect = innerWidth / innerHeight; menuCam.fov = portrait ? 52 : 40; menuCam.updateProjectionMatrix();
+  if (menuCar.userData.halo) menuCar.userData.halo.rotation.y += dt;
+  world.update(dt, menuCar.position);
+  renderer.render(world.scene, menuCam);
+  return true;
 }
 
 // ---------- loop ----------
@@ -345,7 +401,7 @@ function frame(now) {
     if (inp.pausePressed && screen === 'race') { paused = !mpRace; go('pause'); }
     else if (inp.pausePressed && screen === 'pause') { paused = false; go('race'); }
     if (race && !(paused && !mpRace)) {
-      const ctl = screen === 'race' ? { steer: inp.steer, throttle: inp.throttle, brake: inp.brake, nitro: inp.nitro, drift: inp.drift, respawn: inp.respawnPressed }
+      const ctl = screen === 'race' ? { steer: -inp.steer, throttle: inp.throttle, brake: inp.brake, nitro: inp.nitro, drift: inp.drift, respawn: inp.respawnPressed }
         : { steer: 0, throttle: 0, brake: 0, nitro: false, drift: false };
       if (inp.horn && screen === 'race' && !hornHeld) { audio.horn(); net.room && net.horn?.(); }
       hornHeld = inp.horn;
@@ -360,8 +416,19 @@ function frame(now) {
       updateCamera(dt);
       world.update(dt, race.me.model.position);
       const p = race.me.phys;
-      audio.engine(Math.min(1, Math.abs(p.forwardSpeed) / 45), ctl.throttle, p.nitroOn);
+      audio.engine(Math.min(1, Math.abs(p.forwardSpeed) / 50), ctl.throttle, p.nitroOn);
       audio.skid(p.drifting ? Math.min(1, p.driftAmount / 8) : 0);
+      speedLines.update(dt, screen === 'race' ? Math.abs(p.forwardSpeed) : 0, p.nitroOn && screen === 'race', 0.5, camera.aspect < 1 ? 0.4 : 0.44);
+      input.setNitro?.(p.nitroTank, p.nitroOn);
+      // Speed number floating beside your car (Auto Rush style), projected from 3D each frame
+      if (screen === 'race') {
+        const e = camera.matrixWorld.elements; // column 0 = camera right
+        tagV.copy(race.me.model.position).addScaledVector(tagR.set(e[0], 0, e[2]).normalize(), -1.75);
+        tagV.y += 1.35;
+        tagV.project(camera);
+        if (tagV.z < 1) ui.speedTag?.((tagV.x + 1) / 2 * innerWidth, (1 - tagV.y) / 2 * innerHeight, Math.round(Math.abs(p.forwardSpeed) * 3.6));
+        else ui.speedTag?.(null, null, 0);
+      }
       hudTimer -= dt;
       if (hudTimer <= 0 && screen === 'race') {
         hudTimer = 1 / 20;
@@ -372,9 +439,13 @@ function frame(now) {
       }
     }
     renderer.render(world.scene, camera);
+  } else if (screen !== 'garage' && renderMenu(dt, now / 1000)) {
+    audio.engine(0, 0, false); audio.skid(0);
+    speedLines.clear(); ui.speedTag?.(null, null, 0);
   } else {
     audio.engine(0, 0, false); audio.skid(0);
-    // Menu / garage showroom with a slow orbit
+    speedLines.clear(); ui.speedTag?.(null, null, 0);
+    // Garage showroom with a slow orbit
     orbit += dt * (screen === 'garage' ? 0.25 : 0.15);
     // Portrait phones: pull back and aim below the car so it sits in the gap above the bottom panel
     const portrait = innerWidth < innerHeight;
@@ -386,6 +457,8 @@ function frame(now) {
   }
 }
 let hornHeld = false, hitStopUntil = 0;
+const tagV = new THREE.Vector3(), tagR = new THREE.Vector3();
+const speedLines = new SpeedLines(canvas.parentElement, canvas);
 
 // ---------- boot ----------
 function boot() {
@@ -400,7 +473,7 @@ function boot() {
   ui.loading?.(0.3, 'Building Vadodara…');
   requestAnimationFrame(t => { last = t; frame(t); });
   setTimeout(() => {
-    try { loadTrack(TRACKS[0].id); renderer.compile(world.scene, camera); } catch (e) { console.warn(e); }
+    try { loadTrack(TRACKS[0].id, 'sunset'); renderer.compile(world.scene, camera); } catch (e) { console.warn(e); }
     ui.loading?.(1, 'Ready');
   }, 50);
 }

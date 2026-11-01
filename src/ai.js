@@ -1,3 +1,4 @@
+import { BASE_TOP } from './car.js';
 // CPU drivers: follow a lane along the centreline, brake for curvature, drift and use nitro on straights.
 
 export class AIDriver {
@@ -38,7 +39,7 @@ export class AIDriver {
     for (let k = 4; k < span; k += 3) maxCurv = Math.max(maxCurv, Math.abs(track.curv[(phys.index + k) % N]));
     const latMax = 10.5 * this.skill * rubber;
     const vMax = maxCurv > 1e-4 ? Math.sqrt(latMax / maxCurv) : 99;
-    const topSpeed = 40 * phys.stats.speed * this.skill * rubber;
+    const topSpeed = BASE_TOP * phys.stats.speed * this.skill * rubber;
     const target = Math.min(vMax, topSpeed);
 
     // Occasional small mistakes on easier difficulties

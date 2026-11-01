@@ -8,7 +8,7 @@ import {
 const SCREENS = ['loading', 'menu', 'tracks', 'garage', 'mp', 'lobby', 'race', 'pause', 'results'];
 const SVGNS = 'http://www.w3.org/2000/svg';
 const UI_PREFS_KEY = 'lordalto.ui';
-const SPEEDO_MAX = 180; // km/h at full arc
+const POPUP_MAX = 3;
 
 const PAINT_NAMES = {
   '#d8dde3': 'Silky silver', '#f2f2f0': 'Superior white', '#1b1b1f': 'Midnight black', '#b3121d': 'Blazing red',
@@ -133,7 +133,7 @@ export class UI {
     this.screen = 'loading';
     this.points = 0;
     this._shownPoints = 0;
-    this.settings = { quality: 'medium', muted: false, touch: 'buttons', ...loadPrefs() };
+    this.settings = { muted: false, touch: 'buttons', ...loadPrefs() };
     this.trackSel = { track: TRACKS[0]?.id, laps: 3, difficulty: 'normal', timeOfDay: null };
     this.tracks = TRACKS;
     this.garage = null;
@@ -173,6 +173,14 @@ export class UI {
       const sec = this.sections[s];
       if (!sec) continue;
       const on = s === name || (name === 'pause' && s === 'race');
+      const was = sec.classList.contains('is-active');
+      clearTimeout(sec._goneT);
+      if (on) {
+        if (sec.classList.contains('is-gone')) { sec.classList.remove('is-gone'); void sec.offsetWidth; } // restart the enter fade
+      } else if (was) {
+        // after the fade, take it out of rendering entirely so nothing can ghost (frozen transitions in background tabs etc.)
+        sec._goneT = setTimeout(() => { if (!sec.classList.contains('is-active')) sec.classList.add('is-gone'); }, 450);
+      } else sec.classList.add('is-gone');
       sec.classList.toggle('is-active', on);
       if (on) sec.removeAttribute('inert'); else sec.setAttribute('inert', '');
       sec.setAttribute('aria-hidden', on ? 'false' : 'true');
@@ -196,7 +204,11 @@ export class UI {
       }, 60);
     }
     if (name === 'menu' || name === 'mp') this.countdown(null);
-    if (name !== 'race' && name !== 'pause') { const ww = $('hudWrongWay'); if (ww) ww.hidden = true; }
+    if (name !== 'race' && name !== 'pause') {
+      const ww = $('hudWrongWay'); if (ww) ww.hidden = true;
+      $('hudPopups')?.replaceChildren();
+      this._hideIntro();
+    }
     this.sections[name]?.scrollTo?.(0, 0);
     try { window.dispatchEvent(new CustomEvent('ui:screen', { detail: { screen: name, prev } })); } catch { /* old browsers */ }
   }
@@ -610,21 +622,8 @@ export class UI {
     set('lap', Math.min(d.lap | 0, d.laps | 0) || 1, (v) => { $('hudLap').textContent = v; });
     set('laps', d.laps | 0, (v) => { $('hudLaps').textContent = v; });
     set('time', fmtTime(d.time ?? 0), (v) => { $('hudTime').textContent = v; });
-    set('lapTime', fmtTime(d.lapTime ?? d.time ?? 0), (v) => { $('hudLapTime').textContent = v; });
-    set('best', fmtTime(d.best), (v) => { $('hudBest').textContent = v; });
-    const spd = Math.max(0, Math.round(d.speedKmh || 0));
-    set('speed', spd, (v) => {
-      $('hudSpeed').textContent = v;
-      $('speedArc').style.strokeDasharray = `${(Math.min(1, v / SPEEDO_MAX) * 75).toFixed(2)} 100`;
-    });
-    let gear = d.gear;
-    if (gear == null) gear = autoGear(spd);
-    if (gear === 0) gear = 'N'; else if (gear === -1) gear = 'R';
-    set('gear', String(gear), (v) => {
-      const g = $('hudGear');
-      g.textContent = v;
-      g.classList.remove('shift'); void g.offsetWidth; g.classList.add('shift');
-    });
+    set('best', fmtTime(d.best), (v) => { $('hudBest').textContent = v; $('hudBest').closest('.hud-sub').hidden = d.best == null; });
+    // compact nitro bar (desktop only: phones use the N2O button ring driven by Input.setNitro)
     const n01 = Math.max(0, Math.min(1, d.nitro01 || 0));
     set('nitro', Math.round(n01 * 200), () => {
       $('hudNitro').style.transform = `scaleX(${n01.toFixed(3)})`;
@@ -721,17 +720,92 @@ export class UI {
     }
   }
 
+  /**
+   * Floating speed readout beside the player's car. Call every frame with screen px (CSS pixels);
+   * x or y null hides it. Only writes a transform (no layout) and only when the rounded values change.
+   */
+  speedTag(x, y, kmh) {
+    let t = this._tag;
+    if (!t) {
+      const root = $('speedTag');
+      if (!root) return;
+      t = this._tag = { root, num: $('speedTagNum'), vis: false, x: NaN, y: NaN, v: -1 };
+    }
+    if (x == null || y == null || !isFinite(x) || !isFinite(y)) {
+      if (t.vis) { t.vis = false; t.root.classList.remove('on'); }
+      return;
+    }
+    const rx = Math.round(x), ry = Math.round(y);
+    if (rx !== t.x || ry !== t.y) {
+      t.x = rx; t.y = ry;
+      t.root.style.transform = `translate3d(${rx}px,${ry}px,0)`;
+    }
+    const v = Math.max(0, Math.round(+kmh || 0));
+    if (v !== t.v) { t.v = v; t.num.textContent = v; }
+    if (!t.vis) { t.vis = true; t.root.classList.add('on'); }
+  }
+
+  /** Small reward pill under the minimap, e.g. popup('+50 OVERTAKE', 'good'). kind: 'good' | 'nitro' | 'dhadaak'. */
+  popup(text, kind = 'good') {
+    const layer = $('hudPopups');
+    if (!layer) return;
+    text = String(text ?? '').trim();
+    if (!text) return;
+    const live = [...layer.children].filter((c) => !c.classList.contains('out'));
+    for (let i = POPUP_MAX - 1; i < live.length; i++) this._popOut(live[i], true);
+    const k = ['good', 'nitro', 'dhadaak'].includes(kind) ? kind : 'good';
+    const pill = el('div', 'popup popup-' + k);
+    const m = /^([+\-]?\d[\d,]*)\s+(.+)$/.exec(text);
+    if (m) pill.append(el('b', 'popup-pts', m[1]), el('span', 'popup-txt', m[2]));
+    else pill.append(el('span', 'popup-txt', text));
+    layer.prepend(pill); // newest on top
+    pill._t = setTimeout(() => this._popOut(pill), k === 'dhadaak' ? 2200 : 1800);
+  }
+
+  _popOut(pill, fast) {
+    if (!pill || pill.classList.contains('out')) return;
+    clearTimeout(pill._t);
+    pill.classList.add('out');
+    if (fast) pill.classList.add('fast');
+    setTimeout(() => pill.remove(), fast ? 160 : 320);
+  }
+
+  /** Card shown during the countdown, e.g. raceIntro('RACE · BRIGHT DAY CIRCUIT', 'School run past the palace'). Hides at GO. */
+  raceIntro(title, subtitle) {
+    const card = $('raceIntro');
+    if (!card) return;
+    clearTimeout(this._timers.intro);
+    if (title == null) { this._hideIntro(); return; }
+    $('raceIntroTitle').textContent = String(title);
+    const sub = $('raceIntroSub');
+    sub.textContent = subtitle ? String(subtitle) : '';
+    sub.hidden = !subtitle;
+    card.classList.remove('out');
+    card.hidden = false;
+    card.style.animation = 'none'; void card.offsetWidth; card.style.animation = '';
+    this._timers.intro = setTimeout(() => this._hideIntro(), 8000); // safety net if GO never comes
+  }
+
+  _hideIntro() {
+    const card = $('raceIntro');
+    if (!card || card.hidden || card.classList.contains('out')) return;
+    clearTimeout(this._timers.intro);
+    card.classList.add('out');
+    this._timers.introOut = setTimeout(() => { card.hidden = true; card.classList.remove('out'); }, 360);
+  }
+
   // ======================================================================
   // Countdown, banners, toast
   // ======================================================================
   countdown(n) {
     const wrap = $('countdown');
     clearTimeout(this._timers.cd);
-    if (n == null) { wrap.hidden = true; this._cd = null; return; }
+    if (n == null) { wrap.hidden = true; this._cd = null; this._hideIntro(); return; }
     if (this._cd === n && !wrap.hidden) return;
     this._cd = n;
     wrap.hidden = false;
     const go = n <= 0;
+    if (go) this._hideIntro();
     wrap.classList.toggle('go', go);
     const span = el('span', null, go ? 'CHALO!' : String(n));
     span.id = 'countdownNum';
@@ -877,7 +951,6 @@ export class UI {
 
   _applySettings() {
     const s = this.settings;
-    this._segSet('segQuality', s.quality || 'medium');
     this._segSet('segSound', s.muted ? 'off' : 'on');
     this._segSet('segTouch', s.touch || 'buttons');
     this._segSet('segFps', s.fps ? 'on' : 'off');
@@ -942,7 +1015,6 @@ export class UI {
     this._seg('segHostTrack', TRACKS.map((t) => [t.id, (t.short || t.name).toUpperCase()]), (v) => this._hostSetting('track', v));
     this._seg('segHostLaps', lapOpts, (v) => this._hostSetting('laps', +v));
     this._seg('segHostTime', timeOpts, (v) => this._hostSetting('timeOfDay', v === 'auto' ? null : v), true);
-    this._seg('segQuality', [['low', 'LOW'], ['medium', 'MED'], ['high', 'HIGH']], (v) => this._changeSetting('quality', v));
     this._seg('segSound', [['on', 'ON'], ['off', 'OFF']], (v) => this._changeSetting('muted', v === 'off'));
     this._seg('segTouch', [['buttons', 'BUTTONS'], ['tilt', 'TILT'], ['off', 'OFF']], (v) => this._changeSetting('touch', v));
     this._seg('segFps', [['on', 'ON'], ['off', 'OFF']], (v) => this._changeSetting('fps', v === 'on'));
@@ -1188,11 +1260,6 @@ export class UI {
 }
 
 // ---------- misc ----------
-function autoGear(kmh) {
-  const tops = [0, 28, 52, 80, 110, 999];
-  for (let g = 1; g < tops.length; g++) if (kmh < tops[g]) return g;
-  return 5;
-}
 function boundsOf(points) {
   let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
   for (const [x, z] of points) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z); }
