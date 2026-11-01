@@ -1,0 +1,18 @@
+# Render Blueprint: one Node web service that serves the built game (dist/) and the WebSocket rooms (/ws).
+services:
+  - type: web
+    name: lord-alto
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      # vite is a devDependency; make sure npm installs it for the build step.
+      - key: NPM_CONFIG_PRODUCTION
+        value: "false"
+      - key: NPM_CONFIG_INCLUDE
+        value: dev

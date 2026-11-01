@@ -1,0 +1,410 @@
+import './style.css';
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { CARS, TRACKS, DIFFICULTY } from './config.js';
+import { buildTrack } from './tracks.js';
+import { World } from './world.js';
+import { FX } from './fx.js';
+import { buildCarModel, applyMods, disposeCarModel } from './carModel.js';
+import { Race } from './race.js';
+import { Profile } from './save.js';
+import { Input } from './input.js';
+import { GameAudio } from './audio.js';
+import { UI } from './ui.js';
+import { Net, roomFromUrl } from './net.js';
+import { openSelfie, savedSelfie } from './selfie.js';
+
+const profile = new Profile();
+const settings = profile.d.settings;
+const canvas = document.getElementById('game');
+
+// ---------- renderer ----------
+let renderer;
+function makeRenderer() {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: settings.quality !== 'low', powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, settings.quality === 'high' ? 2 : settings.quality === 'medium' ? 1.5 : 1));
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
+  renderer.shadowMap.enabled = settings.quality !== 'low';
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+}
+makeRenderer();
+
+const camera = new THREE.PerspectiveCamera(62, 1, 0.1, 2500);
+const world = new World(renderer);
+let fx = null;
+
+// ---------- garage / menu showroom ----------
+const showroom = new THREE.Scene();
+{
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  showroom.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  showroom.background = new THREE.Color('#1d1747');
+  showroom.fog = new THREE.Fog('#1d1747', 12, 30);
+  const floor = new THREE.Mesh(new THREE.CircleGeometry(4.2, 64), new THREE.MeshStandardMaterial({ color: '#2a2366', roughness: 0.35, metalness: 0.2 }));
+  floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; showroom.add(floor);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(4.2, 4.45, 64), new THREE.MeshBasicMaterial({ color: '#ff9933' }));
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.01; showroom.add(ring);
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(80, 80), new THREE.MeshStandardMaterial({ color: '#151036', roughness: 0.9 }));
+  ground.rotation.x = -Math.PI / 2; ground.position.y = -0.01; showroom.add(ground);
+  const key = new THREE.SpotLight('#fff1d6', 60, 25, 0.6, 0.5); key.position.set(4, 7, 5); key.castShadow = true; key.shadow.mapSize.set(1024, 1024); showroom.add(key);
+  const rim = new THREE.SpotLight('#ff9933', 40, 25, 0.7, 0.6); rim.position.set(-5, 4, -4); showroom.add(rim);
+  showroom.add(new THREE.HemisphereLight('#c9c3ff', '#1d1747', 0.6));
+}
+let showCar = null, showCarId = null, garageIndex = CARS.findIndex(c => c.id === profile.d.selected);
+const showCam = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
+
+function setShowCar(id) {
+  const mods = profile.mods(id);
+  if (showCar && showCarId === id) { applyMods(showCar, mods); return; }
+  if (showCar) { showroom.remove(showCar); disposeCarModel(showCar); }
+  showCar = buildCarModel(id, mods);
+  showCar.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  showroom.add(showCar); showCarId = id;
+}
+
+// ---------- systems ----------
+const input = new Input();
+const audio = new GameAudio();
+const net = new Net();
+let race = null, track = null, screen = 'loading', paused = false;
+let raceSettings = { track: TRACKS[0].id, laps: settings.laps || 3, difficulty: settings.difficulty || 'normal', timeOfDay: settings.timeOfDay || null };
+let mpRace = false, shake = 0, lastBannerAt = 0;
+const avatars = new Map(); // pid -> selfie data URL, for players in the current room
+net.setAvatar(savedSelfie());
+
+const ui = new UI({
+  onPlay: () => { audio.click(); ui.setTracks(TRACKS, raceSettings.track, raceSettings); go('tracks'); },
+  onTrack: id => { raceSettings.track = id; ui.setTracks(TRACKS, id, raceSettings); },
+  onGarage: () => { audio.click(); refreshGarage(); go('garage'); },
+  onCarPrev: () => { garageIndex = (garageIndex + CARS.length - 1) % CARS.length; refreshGarage(); audio.click(); },
+  onCarNext: () => { garageIndex = (garageIndex + 1) % CARS.length; refreshGarage(); audio.click(); },
+  onBuyCar: () => {
+    const car = CARS[garageIndex];
+    if (profile.buy(car.id)) { ui.toast(`${car.name} is yours!`); audio.lapDing(); } else ui.toast('Not enough points');
+    refreshGarage();
+  },
+  onSelectCar: () => { const car = CARS[garageIndex]; profile.select(car.id); ui.toast(`${car.name} selected`); refreshGarage(); if (net.room) net.setCar(car.id, profile.mods(car.id)); },
+  onMod: (key, value) => {
+    const car = CARS[garageIndex];
+    if (!profile.owns(car.id)) { ui.toast('Buy this Alto first'); return; }
+    if (key === 'plate') value = sanitizePlate(value);
+    profile.setMod(car.id, key, value); refreshGarage(); audio.click();
+  },
+  onUpgrade: key => {
+    const car = CARS[garageIndex];
+    if (!profile.owns(car.id)) { ui.toast('Buy this Alto first'); return; }
+    if (profile.upgrade(car.id, key)) { audio.lapDing(); ui.toast('Upgraded!'); } else ui.toast(profile.upgradeCost(car.id, key) == null ? 'Maxed out' : 'Not enough points');
+    refreshGarage();
+  },
+  onStart: s => { Object.assign(raceSettings, s || {}); persistRaceSettings(); startSingle(); },
+  onMultiplayer: () => { audio.click(); ui.prefillName?.(profile.d.name || ''); ui.setSelfie?.(savedSelfie()); go('mp'); },
+  onSelfie: async () => {
+    const r = await openSelfie();
+    if (r === undefined) return; // cancelled
+    net.setAvatar(r);
+    if (net.me) { if (r) avatars.set(net.me, r); else avatars.delete(net.me); if (net.room) ui.setLobby(net.room, net.me, avatars); }
+    ui.setSelfie?.(r);
+    ui.toast(r ? 'Selfie added: friends will see it above your Alto' : 'Selfie removed');
+  },
+  onCreateRoom: async name => {
+    profile.d.name = (name || '').trim().slice(0, 16) || 'Racer'; profile.save();
+    try { await net.create(profile.d.name, profile.d.selected, profile.mods(profile.d.selected)); go('lobby'); }
+    catch (e) { ui.toast(e.message || 'Could not create room'); }
+  },
+  onJoinRoom: async (pin, name) => {
+    profile.d.name = (name || '').trim().slice(0, 16) || 'Racer'; profile.save();
+    try { await net.join(String(pin).trim(), profile.d.name, profile.d.selected, profile.mods(profile.d.selected)); go('lobby'); }
+    catch (e) { ui.toast(e.message || 'Could not join'); }
+  },
+  onLeaveRoom: () => { net.leave(); endRace(); go('menu'); },
+  onHostSettings: s => net.setSettings(s),
+  onHostStart: () => net.start(),
+  onResume: () => { paused = false; go('race'); },
+  onRestart: () => { paused = false; if (mpRace) return; startSingle(); },
+  onQuit: () => { paused = false; if (mpRace) { net.leave(); } endRace(); go('menu'); },
+  onRaceAgain: () => { if (mpRace) { endRace(); go('lobby'); } else startSingle(); },
+  onSettings: s => {
+    const qualityChanged = s.quality && s.quality !== settings.quality;
+    Object.assign(settings, s); profile.save();
+    if (s.muted != null) audio.setMuted(s.muted);
+    input.setTouch(wantTouch());
+    if (qualityChanged) location.reload();
+  },
+  onReady: () => { audio.unlock(); go('menu'); if (pendingPin) { ui.prefillName?.(profile.d.name || ''); go('mp'); ui.prefillPin?.(pendingPin); ui.toast(`Enter your name and join room ${pendingPin}`); } },
+  onPause: () => { if (screen === 'race') { paused = !mpRace; go('pause'); } },
+  onMenu: () => { if (mpRace) net.leave(); endRace(); go('menu'); },
+  onBack: from => { if (from === 'lobby') { net.leave(); endRace(); } go('menu'); },
+  onClick: () => audio.click(),
+  onClaimDaily: () => {
+    const o = profile.claimDaily();
+    if (o) { ui.toast(`Day ${o.day} reward: +${o.points} points`); audio.lapDing(); }
+    ui.daily(profile.dailyOffer()); ui.setPoints(profile.points);
+  },
+});
+
+function sanitizePlate(v) {
+  const s = String(v || '').toUpperCase().replace(/[^A-Z0-9 ]/g, '').trim().slice(0, 13);
+  return s.startsWith('GJ') ? s : ('GJ 06 ' + s).slice(0, 13);
+}
+function persistRaceSettings() { settings.laps = raceSettings.laps; settings.difficulty = raceSettings.difficulty; settings.timeOfDay = raceSettings.timeOfDay; profile.save(); }
+function wantTouch() { return settings.touch !== 'off' && (matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window); }
+
+function refreshGarage() {
+  const car = CARS[garageIndex];
+  setShowCar(car.id);
+  ui.setGarage({
+    car, owned: profile.owns(car.id), selected: profile.d.selected === car.id, price: car.price, canAfford: profile.points >= car.price,
+    mods: profile.mods(car.id), upgrades: Object.fromEntries(['engine', 'turbo', 'tyres', 'nitro'].map(k => [k, { level: profile.levels(car.id)[k], cost: profile.upgradeCost(car.id, k) }])),
+    stats: profile.stats(car.id), maxStats: profile.maxStats(car.id), index: garageIndex, total: CARS.length,
+  });
+  ui.setPoints(profile.points);
+}
+
+function go(s) {
+  screen = s; ui.show(s);
+  input.setTouch(s === 'race' && wantTouch());
+  if (s === 'menu') { garageIndex = CARS.findIndex(c => c.id === profile.d.selected); setShowCar(profile.d.selected); ui.setPoints(profile.points); ui.daily(profile.dailyOffer()); }
+}
+
+// ---------- races ----------
+function loadTrack(id, timeOfDay) {
+  const def = TRACKS.find(t => t.id === id) || TRACKS[0];
+  track = buildTrack(def);
+  world.load(track, { timeOfDay: timeOfDay || def.timeOfDay, quality: settings.quality });
+  fx = new FX(world.scene, settings.quality); // world.load() clears the scene, so particles are rebuilt per track
+  return def;
+}
+
+function playerOpts() {
+  const id = profile.d.selected, def = CARS.find(c => c.id === id);
+  return { carId: id, mods: profile.mods(id), stats: profile.stats(id), nitroMul: def.nitroMul, name: profile.d.name || 'You' };
+}
+
+function startSingle() {
+  endRace();
+  mpRace = false;
+  loadTrack(raceSettings.track, raceSettings.timeOfDay);
+  race = new Race({ scene: world.scene, track, fx, laps: raceSettings.laps, difficulty: DIFFICULTY[raceSettings.difficulty] || 0.95, player: playerOpts(), rivals: 7, shadows: settings.quality !== 'low', onEvent: onRaceEvent });
+  startCamera();
+  go('race');
+}
+
+function startMulti(p) {
+  endRace();
+  mpRace = true;
+  loadTrack(p.track, p.timeOfDay);
+  const room = net.room;
+  race = new Race({ scene: world.scene, track, fx, laps: p.laps, difficulty: 1, player: playerOpts(), net, grid: p.grid, players: room.players, startAt: p.startAt, avatars, shadows: settings.quality !== 'low', onEvent: onRaceEvent });
+  startCamera();
+  go('race');
+  ui.banner('Waiting for everyone to load…', 'info');
+  net.loaded();
+}
+
+function endRace() {
+  if (race) { race.dispose(); race = null; }
+  ui.countdown(null);
+}
+
+let lastCount = null;
+function onRaceEvent(type, d) {
+  switch (type) {
+    case 'go': ui.countdown(0); audio.countdown(true); setTimeout(() => ui.countdown(null), 900); break;
+    case 'nitro': audio.nitroStart(); break;
+    case 'lap': ui.banner(d.lap === d.laps ? 'FINAL LAP!' : `LAP ${d.lap}/${d.laps}`, 'info'); audio.lapDing(); break;
+    case 'wall': if (d.power > 0.25) { audio.crash(d.power * 0.6); shake = Math.max(shake, d.power * 0.3); } break;
+    case 'bump': if (d.mine) { audio.crash(d.power * 0.5); shake = Math.max(shake, d.power * 0.25); } break;
+    case 'dhadaak': {
+      const near = d.mine || (d.pos && race && Math.hypot(d.pos.x - race.me.phys.x, d.pos.z - race.me.phys.z) < 45);
+      if (!near) break;
+      const now = performance.now();
+      if (now - lastBannerAt > 700) {
+        lastBannerAt = now;
+        ui.banner('DHADAAAKK!', 'dhadaak');
+        if (d.mine) ui.toast(d.byMe ? `You DHADAAAKKed ${d.victim}!` : `${d.attacker} DHADAAAKKed you!`);
+      }
+      audio.dhadaak(); shake = Math.min(1, shake + (d.mine ? 0.85 : 0.4));
+      // Hit-stop: a brief near-freeze sells the impact (single-player only, so online clocks stay in sync)
+      if (d.mine && !mpRace) hitStopUntil = performance.now() + 110;
+      if (d.pos) { fx.sparks(new THREE.Vector3(d.pos.x, 0.6, d.pos.z), 40); }
+      if (d.byMe) profile.d.dhadaaks++;
+      break;
+    }
+    case 'finish':
+      if (d.car.isPlayer) {
+        audio.finish();
+        ui.banner(d.place === 1 ? 'PEHLA NUMBER!' : `P${d.place}`, 'info');
+        setTimeout(() => showResults(), mpRace ? 300 : 1800);
+      }
+      break;
+    case 'respawn': ui.toast('Back on the road'); break;
+  }
+}
+
+let resultsShown = false;
+function showResults(mpRows) {
+  if (!race) return;
+  if (!resultsShown) {
+    resultsShown = true;
+    const r = race.rewards();
+    profile.add(r.total); profile.d.races++;
+    if (race.me.place === 1) profile.d.wins++;
+    const best = race.me.bestLap;
+    if (isFinite(best) && profile.setBest(track.id, Math.round(best * 1000))) ui.toast('New personal best lap!');
+    profile.save();
+    race._reward = r;
+  }
+  const rows = mpRows || race.standings().map(s => ({ ...s, points: s.me ? race._reward.total : null }));
+  ui.results(rows, race._reward.total, race._reward.rows);
+  ui.setPoints(profile.points);
+  go('results');
+}
+
+// ---------- multiplayer events ----------
+net.on('room', room => {
+  if (!room) { avatars.clear(); if (screen === 'lobby') go('menu'); return; }
+  for (const pid of [...avatars.keys()]) if (!room.players.some(p => p.pid === pid)) avatars.delete(pid);
+  const mine = savedSelfie(); if (mine && net.me) avatars.set(net.me, mine);
+  if (screen === 'lobby' || screen === 'mp') ui.setLobby(room, net.me, avatars);
+});
+net.on('avatar', (pid, data) => {
+  if (data) avatars.set(pid, data); else avatars.delete(pid);
+  race?.setAvatar(pid, data);
+  if (net.room && screen === 'lobby') ui.setLobby(net.room, net.me, avatars);
+});
+net.on('prepare', p => { resultsShown = false; startMulti(p); });
+net.on('go', ({ startAt }) => { if (race && mpRace) race.o.startAt = startAt; });
+net.on('state', (pid, d) => race?.onRemoteState(pid, d));
+net.on('crash', e => race?.onRemoteCrash(e));
+net.on('horn', () => audio.horn());
+net.on('finish', e => race?.onRemoteFinish({ pid: e.pid ?? e.p, time: e.time / 1000 }));
+net.on('results', res => {
+  const rows = (res.rows || res).map(r => ({ place: r.place, name: r.name, time: r.time != null ? r.time / 1000 : null, best: r.best != null ? r.best / 1000 : null, me: r.pid === net.me }));
+  if (race) showResults(rows);
+});
+net.on('left', pid => race?.onRemoteLeft(pid));
+net.on('kicked', () => { endRace(); ui.toast('You were removed from the room'); go('menu'); });
+net.on('status', s => { if (s === 'offline' && mpRace && race) ui.toast('Connection lost, reconnecting…'); });
+net.on('error', e => ui.toast(e.message || 'Network error'));
+
+// ---------- camera ----------
+const camPos = new THREE.Vector3(), camLook = new THREE.Vector3();
+function startCamera() {
+  const p = race.me.phys;
+  camPos.set(p.x - Math.sin(p.h) * 8, 3.4, p.z - Math.cos(p.h) * 8);
+  camLook.set(p.x, 1, p.z);
+  camera.position.copy(camPos); camera.lookAt(camLook);
+}
+function updateCamera(dt) {
+  const p = race.me.phys;
+  const v = Math.abs(p.forwardSpeed);
+  // Portrait screens are narrow, so sit further back and higher to see the road ahead
+  const portrait = camera.aspect < 1;
+  const back = (portrait ? 8.6 : 6.2) + v * 0.045, up = (portrait ? 3.6 : 2.35) + v * 0.012;
+  const fx_ = Math.sin(p.h), fz = Math.cos(p.h);
+  const y = track.y ? track.y[p.index] || 0 : 0;
+  const tx = p.x - fx_ * back, tz = p.z - fz * back;
+  const k = 1 - Math.exp(-dt * 6);
+  camPos.x += (tx - camPos.x) * k; camPos.z += (tz - camPos.z) * k; camPos.y += (y + up - camPos.y) * k;
+  camLook.set(p.x + fx_ * (portrait ? 6 : 3), y + (portrait ? 0.4 : 1.0), p.z + fz * (portrait ? 6 : 3));
+  camera.position.copy(camPos);
+  camera.lookAt(camLook);
+  if (shake > 0) {
+    // Trauma shake: amplitude = trauma^2 (light bumps barely move, DHADAAAKK punches), smooth noise, decays to rest
+    const s = shake * shake, t = performance.now() / 1000;
+    camera.position.x += Math.sin(t * 37.1) * Math.cos(t * 23.7) * s * 0.55;
+    camera.position.y += Math.sin(t * 41.3 + 1.7) * s * 0.35;
+    camera.rotation.z += Math.sin(t * 29.9 + 0.4) * s * 0.06;
+    shake = Math.max(0, shake - dt * 1.4);
+  }
+  const fov = (portrait ? 74 : 62) + Math.min(10, v * 0.12) + (p.nitroOn ? 8 : 0);
+  camera.fov += (fov - camera.fov) * Math.min(1, dt * 4); camera.updateProjectionMatrix();
+}
+
+// ---------- loop ----------
+function resize() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+  showCam.aspect = w / h;
+  // On portrait phones pull the showroom camera back so the whole car fits
+  showCam.fov = w < h ? 55 : 40; showCam.updateProjectionMatrix();
+}
+addEventListener('resize', resize); resize();
+
+let last = performance.now(), acc = 0, hudTimer = 0, orbit = 0;
+const STEP = 1 / 120;
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  const inp = input.read();
+
+  if (screen === 'race' || screen === 'pause' || screen === 'results') {
+    if (inp.pausePressed && screen === 'race') { paused = !mpRace; go('pause'); }
+    else if (inp.pausePressed && screen === 'pause') { paused = false; go('race'); }
+    if (race && !(paused && !mpRace)) {
+      const ctl = screen === 'race' ? { steer: inp.steer, throttle: inp.throttle, brake: inp.brake, nitro: inp.nitro, drift: inp.drift, respawn: inp.respawnPressed }
+        : { steer: 0, throttle: 0, brake: 0, nitro: false, drift: false };
+      if (inp.horn && screen === 'race' && !hornHeld) { audio.horn(); net.room && net.horn?.(); }
+      hornHeld = inp.horn;
+      acc += performance.now() < hitStopUntil ? dt * 0.06 : dt;
+      while (acc >= STEP) { race.update(STEP, ctl); acc -= STEP; ctl.respawn = false; }
+      // Countdown beeps
+      if (race.phase === 'countdown') {
+        const n = Math.ceil(race.countdown);
+        if (n !== lastCount && n >= 1 && n <= 3) { ui.countdown(n); audio.countdown(false); }
+        lastCount = n;
+      } else lastCount = null;
+      updateCamera(dt);
+      world.update(dt, race.me.model.position);
+      const p = race.me.phys;
+      audio.engine(Math.min(1, Math.abs(p.forwardSpeed) / 45), ctl.throttle, p.nitroOn);
+      audio.skid(p.drifting ? Math.min(1, p.driftAmount / 8) : 0);
+      hudTimer -= dt;
+      if (hudTimer <= 0 && screen === 'race') {
+        hudTimer = 1 / 20;
+        const h = race.hud();
+        ui.hud(h);
+        const mm = world.minimap();
+        ui.minimap(mm.points, mm.bounds, race.mapCars());
+      }
+    }
+    renderer.render(world.scene, camera);
+  } else {
+    audio.engine(0, 0, false); audio.skid(0);
+    // Menu / garage showroom with a slow orbit
+    orbit += dt * (screen === 'garage' ? 0.25 : 0.15);
+    // Portrait phones: pull back and aim below the car so it sits in the gap above the bottom panel
+    const portrait = innerWidth < innerHeight;
+    const r = screen === 'garage' ? (portrait ? 10.5 : 7.2) : (portrait ? 11 : 8.5);
+    showCam.position.set(Math.sin(orbit) * r, portrait ? 3.4 : screen === 'garage' ? 2.2 : 2.6, Math.cos(orbit) * r);
+    showCam.lookAt(0, portrait ? (screen === 'garage' ? -2.2 : -1.6) : 0.7, 0);
+    if (showCar?.userData.halo) showCar.userData.halo.rotation.y += dt;
+    renderer.render(showroom, showCam);
+  }
+}
+let hornHeld = false, hitStopUntil = 0;
+
+// ---------- boot ----------
+function boot() {
+  ui.setSettings({ ...settings, muted: audio.muted });
+  setShowCar(profile.d.selected);
+  ui.setPoints(profile.points);
+  const unlock = () => { audio.unlock(); removeEventListener('pointerdown', unlock); removeEventListener('keydown', unlock); };
+  addEventListener('pointerdown', unlock); addEventListener('keydown', unlock);
+  pendingPin = roomFromUrl();
+  // Warm up: build the first track once so shaders compile before the player taps start
+  ui.show('loading');
+  ui.loading?.(0.3, 'Building Vadodara…');
+  requestAnimationFrame(t => { last = t; frame(t); });
+  setTimeout(() => {
+    try { loadTrack(TRACKS[0].id); renderer.compile(world.scene, camera); } catch (e) { console.warn(e); }
+    ui.loading?.(1, 'Ready');
+  }, 50);
+}
+let pendingPin = null;
+// Testing hook: open the game with ?debug to inspect the running race from the console
+if (new URLSearchParams(location.search).has('debug')) window.__la = { get race() { return race; }, profile, net };
+boot();

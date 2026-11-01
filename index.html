@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#1d1747">
+  <meta name="description" content="Lord Alto: Baroda Grand Prix. Race India's favourite small car through the streets of Vadodara, solo or with up to 8 friends.">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Lord Alto">
+  <title>Lord Alto: Baroda Grand Prix</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icon-192.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Bungee&display=swap">
+  <style>
+    /* critical: avoid a flash of unstyled overlays before the JS bundle (and style.css) arrive */
+    html, body { margin: 0; height: 100%; background: #1d1747; color: #fff; overflow: hidden; }
+    .screen:not(.is-active) { visibility: hidden; opacity: 0; }
+    #settingsDialog:not([open]) { display: none; }
+  </style>
+</head>
+<body data-screen="loading">
+  <!-- Icon sprite -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <symbol id="i-gear" viewBox="0 0 24 24"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.4-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3.3h-4l-.4 2.7a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.4 2.5-1a7.4 7.4 0 0 0 1.7 1l.4 2.7h4l.4-2.7a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></symbol>
+      <symbol id="i-sound" viewBox="0 0 24 24"><path fill="currentColor" d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+      <symbol id="i-mute" viewBox="0 0 24 24"><path fill="currentColor" d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16.5 9.5l5 5m0-5l-5 5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+      <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="5" width="4.2" height="14" rx="1.4" fill="currentColor"/><rect x="13.8" y="5" width="4.2" height="14" rx="1.4" fill="currentColor"/></symbol>
+      <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-next" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></symbol>
+      <symbol id="i-crown" viewBox="0 0 24 24"><path fill="currentColor" d="M3 8l4.5 3.5L12 4l4.5 7.5L21 8l-2 10H5z"/><rect x="5" y="19" width="14" height="2" rx="1" fill="currentColor"/></symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5" fill="currentColor"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></g></symbol>
+      <symbol id="i-sunset" viewBox="0 0 24 24"><path fill="currentColor" d="M6 16a6 6 0 0 1 12 0z"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 19h20M12 4v3M4.2 8.2l2 2M19.8 8.2l-2 2"/></g></symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24"><path fill="currentColor" d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z"/></symbol>
+      <symbol id="i-auto" viewBox="0 0 24 24"><path fill="currentColor" d="M12 3a9 9 0 1 0 0 18V3z"/><circle cx="12" cy="12" r="8.2" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+      <symbol id="i-gift" viewBox="0 0 24 24"><path fill="currentColor" d="M3 9h18v4H3zM5 13h14v8H5z"/><path fill="#1d1747" d="M11 9h2v12h-2z"/><path d="M12 9C9 9 7 7.5 8 6s4 .5 4 3c0-2.5 3-4.5 4-3s-1 3-4 3" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+      <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5" fill="currentColor"/><path fill="currentColor" d="M2 20a7 7 0 0 1 14 0z"/><circle cx="17" cy="9" r="2.8" fill="currentColor" opacity=".75"/><path fill="currentColor" opacity=".75" d="M15.5 13.6A6 6 0 0 1 22.5 20H17.5a8.6 8.6 0 0 0-2-6.4z"/></symbol>
+      <symbol id="i-wrench" viewBox="0 0 24 24"><path fill="currentColor" d="M21 7.5a5.5 5.5 0 0 1-7.4 5.2l-7.3 7.3a2.1 2.1 0 0 1-3-3l7.3-7.3A5.5 5.5 0 0 1 17.5 2l-3.3 3.3 1.1 3.4 3.4 1.1L22 6.5c0 .3-1 .7-1 1z"/></symbol>
+      <symbol id="i-flag" viewBox="0 0 24 24"><path fill="currentColor" d="M5 3h2v18H5z"/><path fill="currentColor" d="M7 4h12l-2.5 4L19 12H7z"/></symbol>
+      <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3.2-3.2a4.5 4.5 0 0 0-6.4-6.4L12 5.6M14 10a4.5 4.5 0 0 0-6.4 0l-3.2 3.2a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+      <symbol id="i-share" viewBox="0 0 24 24"><circle cx="18" cy="5.5" r="3" fill="currentColor"/><circle cx="6" cy="12" r="3" fill="currentColor"/><circle cx="18" cy="18.5" r="3" fill="currentColor"/><path d="M8.6 10.6l6.8-3.8M8.6 13.4l6.8 3.8" stroke="currentColor" stroke-width="2"/></symbol>
+      <symbol id="i-camera" viewBox="0 0 24 24"><path fill="currentColor" d="M8.5 4h7l1.6 2.5H20a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8.5a2 2 0 0 1 2-2h2.9z"/><circle cx="12" cy="13" r="4.2" fill="#1d1747"/><circle cx="12" cy="13" r="2.6" fill="currentColor"/></symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4.5" y="10.5" width="15" height="11" rx="2.5" fill="currentColor"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="2.4"/></symbol>
+    </defs>
+  </svg>
+
+  <div id="app" class="app">
+    <canvas id="game" aria-label="Race view"></canvas>
+
+    <div id="ui" class="ui">
+
+      <!-- LOADING -->
+      <section class="screen screen-loading is-active" id="screen-loading" data-screen="loading" aria-label="Loading">
+        <div class="sunburst" aria-hidden="true"></div>
+        <div class="loading-inner">
+          <div class="logo logo-center">
+            <svg class="logo-crown" aria-hidden="true"><use href="#i-crown"/></svg>
+            <h1 class="logo-title"><span class="logo-lord">LORD</span><span class="logo-alto">ALTO</span></h1>
+            <div class="logo-ribbon">BARODA GRAND PRIX</div>
+          </div>
+          <div class="loadbar" id="loadProgress" role="progressbar" aria-label="Loading" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <div class="loadbar-fill" id="loadBar"></div>
+          </div>
+          <p class="load-status" id="loadStatus">Warming up the engine…</p>
+          <button type="button" class="btn btn-primary tap-start" id="btnTapStart" hidden>TAP TO START</button>
+          <p class="load-tip" id="loadTip"></p>
+        </div>
+      </section>
+
+      <!-- MENU -->
+      <section class="screen screen-menu" id="screen-menu" data-screen="menu" aria-label="Main menu">
+        <header class="topbar">
+          <div class="points-pill" aria-label="Points"><span class="coin" aria-hidden="true">₹</span><b class="js-points">0</b><small>pts</small></div>
+          <div class="topbar-actions">
+            <button type="button" class="icon-btn" id="btnMute" aria-label="Mute sound" aria-pressed="false"><svg><use href="#i-sound"/></svg></button>
+            <button type="button" class="icon-btn" id="btnSettings" aria-label="Settings"><svg><use href="#i-gear"/></svg></button>
+          </div>
+        </header>
+        <div class="menu-body">
+          <div class="logo">
+            <svg class="logo-crown" aria-hidden="true"><use href="#i-crown"/></svg>
+            <h1 class="logo-title"><span class="logo-lord">LORD</span><span class="logo-alto">ALTO</span></h1>
+            <div class="logo-ribbon">BARODA GRAND PRIX</div>
+            <p class="menu-tagline">Race India’s favourite small car through the streets of Vadodara</p>
+          </div>
+          <nav class="menu-buttons" aria-label="Main">
+            <button type="button" class="btn btn-primary btn-xl" id="btnRace"><span class="btn-row"><svg class="btn-ico"><use href="#i-flag"/></svg>RACE</span><small>quick race vs 7 rivals</small></button>
+            <button type="button" class="btn btn-indigo btn-lg" id="btnMulti"><span class="btn-row"><svg class="btn-ico"><use href="#i-users"/></svg>MULTIPLAYER</span><small>play with friends</small></button>
+            <div class="menu-row">
+              <button type="button" class="btn btn-glass" id="btnGarage"><span class="btn-row"><svg class="btn-ico"><use href="#i-wrench"/></svg>GARAGE</span></button>
+              <button type="button" class="btn btn-glass btn-daily" id="btnDaily"><span class="btn-row"><svg class="btn-ico"><use href="#i-gift"/></svg>DAILY</span><small id="dailyText">reward</small></button>
+            </div>
+          </nav>
+        </div>
+      </section>
+
+      <!-- TRACKS -->
+      <section class="screen screen-tracks screen-dim" id="screen-tracks" data-screen="tracks" aria-label="Choose track">
+        <header class="topbar">
+          <button type="button" class="icon-btn" data-back aria-label="Back"><svg><use href="#i-back"/></svg></button>
+          <h2 class="screen-title">CHOOSE TRACK</h2>
+          <div class="points-pill"><span class="coin" aria-hidden="true">₹</span><b class="js-points">0</b><small>pts</small></div>
+        </header>
+        <div class="tracks-body">
+          <div class="track-list" id="trackList" role="radiogroup" aria-label="Tracks"></div>
+          <div class="panel race-setup">
+            <div class="setting"><span class="setting-label">LAPS</span><div class="seg" id="segLaps" role="radiogroup" aria-label="Laps"></div></div>
+            <div class="setting"><span class="setting-label">RIVALS</span><div class="seg" id="segRivals" role="radiogroup" aria-label="Rival difficulty"></div></div>
+            <div class="setting"><span class="setting-label">TIME</span><div class="seg seg-icons" id="segTime" role="radiogroup" aria-label="Time of day"></div></div>
+            <button type="button" class="btn btn-primary btn-xl btn-chalo" id="btnStart">CHALO!<small>start race</small></button>
+          </div>
+        </div>
+      </section>
+
+      <!-- GARAGE -->
+      <section class="screen screen-garage" id="screen-garage" data-screen="garage" aria-label="Garage">
+        <header class="topbar">
+          <button type="button" class="icon-btn" data-back aria-label="Back"><svg><use href="#i-back"/></svg></button>
+          <h2 class="screen-title">GARAGE</h2>
+          <div class="points-pill"><span class="coin" aria-hidden="true">₹</span><b class="js-points">0</b><small>pts</small></div>
+        </header>
+        <div class="garage-layout">
+          <div class="garage-stage">
+            <div class="car-info" aria-live="polite">
+              <div class="car-era"><span id="carEra">2000</span><span class="car-lock" id="carLock" hidden><svg><use href="#i-lock"/></svg>LOCKED</span><span class="car-owned" id="carOwned" hidden>OWNED</span></div>
+              <h3 class="car-name" id="carName">Alto</h3>
+              <p class="car-tagline" id="carTagline"></p>
+            </div>
+            <button type="button" class="arrow arrow-left" id="btnCarPrev" aria-label="Previous car"><svg><use href="#i-back"/></svg></button>
+            <button type="button" class="arrow arrow-right" id="btnCarNext" aria-label="Next car"><svg><use href="#i-next"/></svg></button>
+            <div class="garage-cta">
+              <div class="car-dots" id="carDots" aria-hidden="true"></div>
+              <span class="car-count" id="carCount">1 / 9</span>
+              <button type="button" class="btn btn-primary btn-lg" id="btnBuySelect">SELECT</button>
+            </div>
+          </div>
+          <aside class="panel garage-panel" aria-label="Upgrades and style">
+            <div class="tabs" role="tablist">
+              <button type="button" role="tab" class="tab" id="tabPerf" aria-selected="true" aria-controls="panelPerf">PERFORMANCE</button>
+              <button type="button" role="tab" class="tab" id="tabStyle" aria-selected="false" aria-controls="panelStyle">STYLE</button>
+            </div>
+            <div class="tabpanel" id="panelPerf" role="tabpanel" aria-labelledby="tabPerf">
+              <div class="upgrade-list" id="upgradeList"></div>
+              <p class="hint" id="upgradeHint">Upgrades stay with this car. Earn points by racing, drifting and DHADAAAKKing rivals.</p>
+            </div>
+            <div class="tabpanel" id="panelStyle" role="tabpanel" aria-labelledby="tabStyle" hidden>
+              <div class="mod-group"><h4>PAINT</h4><div class="swatches" id="swPaint" role="radiogroup" aria-label="Paint"></div></div>
+              <div class="mod-group"><h4>RIMS</h4><div class="swatches" id="swRims" role="radiogroup" aria-label="Rims"></div></div>
+              <div class="mod-group"><h4>SPOILER</h4><div class="seg" id="segSpoiler" role="radiogroup" aria-label="Spoiler"></div></div>
+              <div class="mod-group"><h4>UNDERGLOW</h4><div class="swatches" id="swGlow" role="radiogroup" aria-label="Underglow"></div></div>
+              <div class="mod-group"><h4>STICKER</h4><div class="chips" id="chipSticker" role="radiogroup" aria-label="Sticker"></div></div>
+              <div class="mod-group"><h4><label for="rngTint">WINDOW TINT</label></h4><input type="range" id="rngTint" min="0" max="1" step="0.05" value="0.4" class="range"></div>
+              <div class="mod-group"><h4><label for="plateInput">NUMBER PLATE</label></h4>
+                <div class="plate"><span class="plate-ind" aria-hidden="true">IND</span><span class="plate-prefix">GJ 06</span><input id="plateInput" class="plate-input" maxlength="7" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="LA 0001"></div>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- MULTIPLAYER -->
+      <section class="screen screen-mp screen-dim" id="screen-mp" data-screen="mp" aria-label="Multiplayer">
+        <header class="topbar">
+          <button type="button" class="icon-btn" data-back aria-label="Back"><svg><use href="#i-back"/></svg></button>
+          <h2 class="screen-title">MULTIPLAYER</h2>
+          <div class="points-pill"><span class="coin" aria-hidden="true">₹</span><b class="js-points">0</b><small>pts</small></div>
+        </header>
+        <div class="mp-body">
+          <div class="panel mp-panel">
+            <label class="field-label" for="mpName">YOUR RACER NAME</label>
+            <div class="name-row">
+              <button type="button" class="selfie-btn" id="selfieBtn" aria-label="Add selfie">
+                <span class="selfie-empty"><svg><use href="#i-camera"/></svg><small>Add selfie</small></span>
+                <img class="selfie-img" id="selfieImg" alt="Your selfie" hidden>
+              </button>
+              <input id="mpName" class="text-input" maxlength="16" required autocomplete="nickname" spellcheck="false" placeholder="Your name">
+            </div>
+            <div class="mp-cols">
+              <div class="mp-card">
+                <h3>HOST A RACE</h3>
+                <p>Create a room, get a PIN, invite your gang.</p>
+                <button type="button" class="btn btn-primary btn-lg" id="btnCreateRoom">CREATE ROOM</button>
+              </div>
+              <div class="mp-or" aria-hidden="true"><span>OR</span></div>
+              <div class="mp-card">
+                <h3>JOIN A FRIEND</h3>
+                <label class="sr-only" for="mpPin">Room PIN</label>
+                <input id="mpPin" class="pin-input" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="PIN">
+                <button type="button" class="btn btn-indigo btn-lg" id="btnJoinRoom">JOIN</button>
+              </div>
+            </div>
+            <p class="hint">Share the 4-digit PIN with friends: up to 8 racers, on any phone, tablet or laptop.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- LOBBY -->
+      <section class="screen screen-lobby screen-dim" id="screen-lobby" data-screen="lobby" aria-label="Lobby">
+        <header class="topbar">
+          <button type="button" class="btn btn-glass btn-sm" id="btnLeave">LEAVE</button>
+          <h2 class="screen-title">LOBBY</h2>
+          <div class="points-pill"><span class="coin" aria-hidden="true">₹</span><b class="js-points">0</b><small>pts</small></div>
+        </header>
+        <div class="lobby-body">
+          <div class="panel lobby-pin-card">
+            <span class="pin-label">ROOM PIN</span>
+            <div class="pin-big" id="lobbyPin" aria-live="polite">----</div>
+            <div class="pin-actions">
+              <button type="button" class="btn btn-glass btn-sm" id="btnCopyLink"><span class="btn-row"><svg class="btn-ico"><use href="#i-link"/></svg>COPY LINK</span></button>
+              <button type="button" class="btn btn-glass btn-sm" id="btnShare"><span class="btn-row"><svg class="btn-ico"><use href="#i-share"/></svg>SHARE</span></button>
+            </div>
+          </div>
+          <div class="panel lobby-players">
+            <h3 class="panel-title">RACERS <span class="count" id="lobbyCount">1/8</span></h3>
+            <ul class="player-list" id="lobbyPlayers"></ul>
+          </div>
+          <div class="panel lobby-settings">
+            <h3 class="panel-title">RACE SETTINGS <span class="count" id="lobbyHostNote"></span></h3>
+            <div class="setting setting-stack"><span class="setting-label">TRACK</span><div class="seg seg-wrap" id="segHostTrack" role="radiogroup" aria-label="Track"></div></div>
+            <div class="setting"><span class="setting-label">LAPS</span><div class="seg" id="segHostLaps" role="radiogroup" aria-label="Laps"></div></div>
+            <div class="setting"><span class="setting-label">TIME</span><div class="seg seg-icons" id="segHostTime" role="radiogroup" aria-label="Time of day"></div></div>
+            <button type="button" class="btn btn-primary btn-xl" id="btnHostStart">START RACE</button>
+            <p class="waiting" id="lobbyWaiting"><span class="dots"><i></i><i></i><i></i></span>Waiting for the host to start</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- RACE HUD -->
+      <section class="screen screen-race" id="screen-race" data-screen="race" aria-label="Race">
+        <div class="hud-tl">
+          <div class="hud-pos"><span id="hudPlace">1</span><sup id="hudPlaceSuf">st</sup><span class="hud-total">/<span id="hudTotal">8</span></span></div>
+          <div class="hud-lap">LAP <b id="hudLap">1</b>/<span id="hudLaps">3</span></div>
+        </div>
+        <div class="hud-tc">
+          <div class="hud-time" id="hudTime">0:00.00</div>
+          <div class="hud-sub"><span>LAP <b id="hudLapTime">0:00.00</b></span><span>BEST <b id="hudBest">--:--.--</b></span></div>
+        </div>
+        <div class="hud-tr">
+          <button type="button" class="icon-btn hud-pause" id="btnPause" aria-label="Pause"><svg><use href="#i-pause"/></svg></button>
+          <canvas class="minimap" id="minimap" aria-label="Track map"></canvas>
+        </div>
+        <div class="hud-wrongway" id="hudWrongWay" hidden>WRONG WAY!</div>
+        <div class="hud-bottom">
+          <div class="hud-drift" id="hudDrift"><div class="drift-label">DRIFT <b id="hudDriftVal">0 m</b></div><div class="drift-bar"><i id="hudDriftFill"></i></div></div>
+          <div class="hud-speedo">
+            <svg class="speedo-svg" viewBox="0 0 200 200" aria-hidden="true">
+              <defs>
+                <linearGradient id="speedGrad" x1="0" y1="1" x2="1" y2="0">
+                  <stop offset="0" stop-color="#ffc533"/><stop offset=".6" stop-color="#ff9933"/><stop offset="1" stop-color="#ff3b2f"/>
+                </linearGradient>
+              </defs>
+              <circle class="speedo-bg" cx="100" cy="100" r="86"/>
+              <circle class="speedo-track" cx="100" cy="100" r="74" pathLength="100"/>
+              <circle class="speedo-ticks" cx="100" cy="100" r="88" pathLength="100"/>
+              <circle class="speedo-fill" id="speedArc" cx="100" cy="100" r="74" pathLength="100"/>
+            </svg>
+            <div class="speedo-read">
+              <div class="speed-num" id="hudSpeed">0</div>
+              <div class="speed-unit">KM/H</div>
+            </div>
+            <div class="gear" id="hudGear" aria-label="Gear">1</div>
+          </div>
+          <div class="hud-nitro" id="hudNitroWrap"><span>NITRO</span><div class="nitro-bar"><i id="hudNitro"></i></div></div>
+        </div>
+        <div class="fps" id="fps" hidden>60 FPS</div>
+      </section>
+
+      <!-- PAUSE -->
+      <section class="screen screen-pause screen-dim" id="screen-pause" data-screen="pause" aria-label="Paused">
+        <div class="panel pause-panel">
+          <h2 class="big-title">PAUSED</h2>
+          <p class="pause-note" id="pauseMpNote" hidden>Multiplayer race: the race goes on while you are here!</p>
+          <div class="stack">
+            <button type="button" class="btn btn-primary btn-lg" id="btnResume">RESUME</button>
+            <button type="button" class="btn btn-glass" id="btnRestart">RESTART</button>
+            <button type="button" class="btn btn-glass" id="btnPauseSettings">SETTINGS</button>
+            <button type="button" class="btn btn-danger" id="btnQuit">QUIT</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- RESULTS -->
+      <section class="screen screen-results screen-dim" id="screen-results" data-screen="results" aria-label="Results">
+        <div class="results-wrap">
+          <div class="results-head">
+            <div class="results-place" id="resultsPlace">1<sup>st</sup></div>
+            <div>
+              <h2 class="big-title" id="resultsTitle">SHABAASH!</h2>
+              <p class="results-sub" id="resultsSub">You won the Baroda Grand Prix</p>
+            </div>
+          </div>
+          <div class="results-grid">
+            <div class="panel results-table">
+              <ol class="podium" id="resultsList"></ol>
+            </div>
+            <div class="panel results-points">
+              <h3 class="panel-title">POINTS EARNED</h3>
+              <ul class="breakdown" id="resultsBreakdown"></ul>
+              <div class="earned"><span>THIS RACE</span><b id="resultsEarned">+0</b></div>
+              <div class="balance"><span>BALANCE</span><b><span class="js-points">0</span> pts</b></div>
+            </div>
+          </div>
+          <div class="results-actions">
+            <button type="button" class="btn btn-primary btn-lg" id="btnRaceAgain">RACE AGAIN</button>
+            <button type="button" class="btn btn-glass" id="btnResultsGarage">GARAGE</button>
+            <button type="button" class="btn btn-glass" id="btnResultsMenu">MENU</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- Overlays that must not shake -->
+  <div class="countdown" id="countdown" aria-live="assertive" hidden><span id="countdownNum">3</span></div>
+  <div class="banners" id="banners" aria-live="polite"></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <!-- SETTINGS -->
+  <dialog id="settingsDialog" class="modal" aria-labelledby="settingsTitle">
+    <form method="dialog" class="panel modal-panel">
+      <header class="modal-head">
+        <h2 id="settingsTitle" class="screen-title">SETTINGS</h2>
+        <button type="submit" class="icon-btn" value="close" aria-label="Close settings"><svg><use href="#i-close"/></svg></button>
+      </header>
+      <div class="setting"><span class="setting-label">GRAPHICS</span><div class="seg" id="segQuality" role="radiogroup" aria-label="Graphics quality"></div></div>
+      <div class="setting"><span class="setting-label">SOUND</span><div class="seg" id="segSound" role="radiogroup" aria-label="Sound"></div></div>
+      <div class="setting"><span class="setting-label"><label for="rngMusic">MUSIC</label></span><input type="range" id="rngMusic" class="range" min="0" max="1" step="0.05" value="0.5"></div>
+      <div class="setting"><span class="setting-label">TOUCH</span><div class="seg" id="segTouch" role="radiogroup" aria-label="Touch controls"></div></div>
+      <div class="setting"><span class="setting-label">SHOW FPS</span><div class="seg" id="segFps" role="radiogroup" aria-label="Show FPS"></div></div>
+      <p class="hint" id="qualityHint">Changing graphics quality reloads the game.</p>
+      <button type="submit" class="btn btn-primary btn-lg" value="close">DONE</button>
+    </form>
+  </dialog>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
