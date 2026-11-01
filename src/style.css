@@ -498,6 +498,8 @@ button:focus-visible, input:focus-visible, .track-card:focus-visible {
 .setting { display: flex; align-items: center; gap: 12px; justify-content: space-between; flex-wrap: wrap; margin: 0 0 14px; }
 .setting-stack { flex-direction: column; align-items: stretch; }
 .setting-label { font-family: var(--display); font-size: 13px; letter-spacing: 0.08em; color: var(--sand); min-width: 4.8em; }
+.setting-val { font-family: var(--body); font-weight: 800; font-size: 13px; color: var(--marigold); margin-left: 6px; font-variant-numeric: tabular-nums; }
+.setting-hint { margin: -8px 0 14px; font-size: 12px; line-height: 1.35; color: rgba(255, 255, 255, 0.62); }
 .seg {
   display: inline-flex;
   padding: 4px;

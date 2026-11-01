@@ -317,6 +317,8 @@
       <div class="setting"><span class="setting-label">SOUND</span><div class="seg" id="segSound" role="radiogroup" aria-label="Sound"></div></div>
       <div class="setting"><span class="setting-label"><label for="rngMusic">MUSIC</label></span><input type="range" id="rngMusic" class="range" min="0" max="1" step="0.05" value="0.5"></div>
       <div class="setting"><span class="setting-label">TOUCH</span><div class="seg" id="segTouch" role="radiogroup" aria-label="Touch controls"></div></div>
+      <div class="setting"><span class="setting-label"><label for="rngSteer">STEERING</label> <output id="outSteer" for="rngSteer" class="setting-val">100%</output></span><input type="range" id="rngSteer" class="range" min="0.5" max="1.6" step="0.05" value="1" aria-describedby="hintSteer"></div>
+      <p class="setting-hint" id="hintSteer">Lower = smoother, calmer turns. Higher = sharper, quicker turns.</p>
       <div class="setting"><span class="setting-label">SHOW FPS</span><div class="seg" id="segFps" role="radiogroup" aria-label="Show FPS"></div></div>
       <button type="submit" class="btn btn-primary btn-lg" value="close">DONE</button>
     </form>

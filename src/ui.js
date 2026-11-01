@@ -956,6 +956,8 @@ export class UI {
     this._segSet('segFps', s.fps ? 'on' : 'off');
     const m = $('rngMusic');
     if (m && document.activeElement !== m) { m.value = s.music ?? 0.5; this._rangeFill(m); }
+    const st = $('rngSteer');
+    if (st && document.activeElement !== st) { st.value = s.steerSens ?? 1; this._rangeFill(st); this._steerLabel(); }
     const mute = $('btnMute');
     if (mute) {
       mute.setAttribute('aria-pressed', s.muted ? 'true' : 'false');
@@ -1070,6 +1072,7 @@ export class UI {
   }
 
   _rangeFill(r) { r.style.setProperty('--p', ((r.value - r.min) / (r.max - r.min)) * 100 + '%'); }
+  _steerLabel() { const r = $('rngSteer'), o = $('outSteer'); if (r && o) o.textContent = Math.round(r.value * 100) + '%'; }
 
   _hostSetting(key, value) {
     if (!this.room || this.room.host !== this.mePid) return;
@@ -1208,6 +1211,9 @@ export class UI {
     const music = $('rngMusic');
     music?.addEventListener('input', () => { this._rangeFill(music); this.settings.music = +music.value; window.dispatchEvent(new CustomEvent('lordalto:music', { detail: { volume: +music.value } })); });
     music?.addEventListener('change', () => { this.settings.music = undefined; this._changeSetting('music', +music.value); });
+    const steer = $('rngSteer');
+    // Apply while dragging so you can feel it mid-race from the pause menu
+    steer?.addEventListener('input', () => { this._rangeFill(steer); this._steerLabel(); this.settings.steerSens = +steer.value; this._call('onSettings', { steerSens: +steer.value }); });
     $('settingsDialog')?.addEventListener('click', (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); });
 
     // keyboard navigation

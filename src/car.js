@@ -71,10 +71,12 @@ export class CarPhysics {
     if (vF > top) vF += (top - vF) * Math.min(1, 2.5 * dt);
 
     // Steering: less lock at speed
+    // ctl.sens = player's steering sensitivity (0.5..1.6, default 1): scales both how far and how quickly the wheels turn
+    const sens = ctl.sens ?? 1;
     const target = spinning ? 0 : ctl.steer;
-    this.steer += (target - this.steer) * Math.min(1, 10 * dt);
+    this.steer += (target - this.steer) * Math.min(1, 32 * sens * dt);
     const speedAbs = Math.abs(vF);
-    const lock = 0.55 / (1 + speedAbs / 22) * (0.85 + 0.15 * s.handling);
+    const lock = 0.55 / (1 + speedAbs / 26) * (0.85 + 0.15 * s.handling) * (0.55 + 0.45 * sens);
     const wheel = this.steer * lock;
 
     // Drift: handbrake-style. Grip drops so the tail slides; nitro refills from drift.
@@ -85,7 +87,7 @@ export class CarPhysics {
     let yawTarget = vF * Math.tan(wheel) / WHEELBASE;
     if (this.drifting) yawTarget *= 1.55;
     if (spinning) this.yaw += (Math.sign(this.yaw || 1) * 7 - this.yaw) * Math.min(1, 3 * dt);
-    else this.yaw += (yawTarget - this.yaw) * Math.min(1, (this.drifting ? 5 : 12) * dt);
+    else this.yaw += (yawTarget - this.yaw) * Math.min(1, (this.drifting ? 9 : 28) * dt);
     this.h += this.yaw * dt;
 
     this.driftAmount = Math.abs(vR);

@@ -13,8 +13,8 @@ const KEYMAP = {
   KeyR: 'respawn',
 };
 const EDGE = new Set(['pause', 'respawn']);
-const STEER_RAMP = 1 / 0.12; // full lock in ~0.12 s
-const STEER_RETURN = 1 / 0.06; // centre twice as fast
+const STEER_RAMP = 1 / 0.045; // full lock in ~45 ms (snappy but not a digital jerk)
+const STEER_RETURN = 1 / 0.03; // centre even faster
 const PAD_DEAD = 0.15;
 const TILT_RANGE = 24; // degrees for full lock
 

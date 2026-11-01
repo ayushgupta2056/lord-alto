@@ -317,7 +317,7 @@ function updateCamera(dt) {
   const fx_ = Math.sin(p.h), fz = Math.cos(p.h);
   const y = track.y ? track.y[p.index] || 0 : 0;
   const tx = p.x - fx_ * back, tz = p.z - fz * back;
-  const k = 1 - Math.exp(-dt * 7.5);
+  const k = 1 - Math.exp(-dt * 11); // tight follow so turns read instantly
   camPos.x += (tx - camPos.x) * k; camPos.z += (tz - camPos.z) * k; camPos.y += (y + up - camPos.y) * k;
   const ahead = portrait ? 7 : 4.5;
   camLook.set(p.x + fx_ * ahead, y + (portrait ? 0.55 : 0.95), p.z + fz * ahead);
@@ -401,7 +401,7 @@ function frame(now) {
     if (inp.pausePressed && screen === 'race') { paused = !mpRace; go('pause'); }
     else if (inp.pausePressed && screen === 'pause') { paused = false; go('race'); }
     if (race && !(paused && !mpRace)) {
-      const ctl = screen === 'race' ? { steer: -inp.steer, throttle: inp.throttle, brake: inp.brake, nitro: inp.nitro, drift: inp.drift, respawn: inp.respawnPressed }
+      const ctl = screen === 'race' ? { steer: -inp.steer, throttle: inp.throttle, brake: inp.brake, nitro: inp.nitro, drift: inp.drift, respawn: inp.respawnPressed, sens: settings.steerSens ?? 1 }
         : { steer: 0, throttle: 0, brake: 0, nitro: false, drift: false };
       if (inp.horn && screen === 'race' && !hornHeld) { audio.horn(); net.room && net.horn?.(); }
       hornHeld = inp.horn;
