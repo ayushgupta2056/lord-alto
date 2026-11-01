@@ -4,6 +4,7 @@ services:
     name: lord-alto
     runtime: node
     plan: free
+    region: singapore   # closest Render region to India (lowest lag for players in Vadodara)
     buildCommand: npm install && npm run build
     startCommand: npm start
     healthCheckPath: /healthz
