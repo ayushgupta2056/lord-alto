@@ -133,12 +133,13 @@ export function buildTrack(def) {
     C.push([a[0], a[1]]);
     const dx = b[0] - a[0], dz = b[1] - a[1];
     const L = Math.hypot(dx, dz);
-    const m = Math.floor(L / 130);
+    const wg = def.wiggle || { every: 130, amp: 0.07, max: 30 };
+    const m = Math.floor(L / wg.every);
     const nx = -dz / (L || 1), nz = dx / (L || 1);
     let sgn = rnd() < 0.5 ? -1 : 1;
     for (let j = 1; j <= m; j++) {
       const t = j / (m + 1);
-      const amp = Math.min(L * 0.07, 30) * (0.6 + 0.6 * rnd()) * sgn;
+      const amp = Math.min(L * wg.amp, wg.max) * (0.6 + 0.6 * rnd()) * sgn;
       sgn = -sgn;
       C.push([a[0] + dx * t + nx * amp, a[1] + dz * t + nz * amp]);
     }

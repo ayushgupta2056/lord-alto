@@ -892,6 +892,27 @@ export class UI {
     this._timers.shake = setTimeout(() => a.classList.remove('shake'), 520);
   }
 
+  /** Checkpoint photo: the player's own photo of the place across the top half of the screen for ~2.6 s. */
+  cpPhoto(d) {
+    const box = $('cpPhoto');
+    if (!box) return;
+    if (!d || !d.photo) { box.hidden = true; return; }
+    const img = $('cpPhotoImg');
+    img.src = '/photos/' + d.photo;
+    img.alt = d.name || '';
+    $('cpPhotoN').textContent = d.final ? 'FINISH' : (d.n === d.total ? 'LAP DONE' : `CHECKPOINT ${d.n}/${d.total}`);
+    $('cpPhotoName').textContent = d.name || '';
+    const msg = $('cpPhotoMsg');
+    msg.textContent = d.msg || '';
+    msg.hidden = !d.msg;
+    $('toast')?.classList.remove('show'); // the photo owns the top of the screen for its 2.6 s
+    box.hidden = false;
+    box.classList.remove('show', 'out'); void box.offsetWidth; box.classList.add('show');
+    clearTimeout(this._timers.cpPhoto); clearTimeout(this._timers.cpPhotoOut);
+    this._timers.cpPhoto = setTimeout(() => box.classList.add('out'), 2500);
+    this._timers.cpPhotoOut = setTimeout(() => { box.hidden = true; box.classList.remove('show', 'out'); }, 2850);
+  }
+
   toast(text) {
     const t = $('toast');
     t.textContent = String(text ?? '');
@@ -911,7 +932,9 @@ export class UI {
       wt.hidden = !win;
       if (win) {
         $('winTitleMain').textContent = win.title;
-        $('winTitleSub').textContent = `${win.name} won in the ${win.car}`;
+        $('winTitleSub').textContent = win.me ? `You won in the ${win.car}` : `${win.name} won in the ${win.car}`;
+        wt.classList.toggle('mine', !!win.me);
+        this._confetti(win.me);
         wt.classList.remove('show'); void wt.offsetWidth; wt.classList.add('show');
       }
     }
@@ -922,7 +945,8 @@ export class UI {
     if (place) pl.appendChild(el('sup', null, ordinal(place)));
     pl.classList.toggle('p1', place === 1);
     pl.style.animation = 'none'; void pl.offsetWidth; pl.style.animation = '';
-    const titles = place === 1 ? ['SHABAASH!', 'Pehla number! You own the streets of Baroda.']
+    const titles = place === 1 && win?.me ? ['PEHLA NUMBER!', `Shabaash! The ${win.car} owns the streets of Baroda.`]
+      : place === 1 ? ['SHABAASH!', 'Pehla number! You own the streets of Baroda.']
       : place === 2 ? ['SO CLOSE!', 'Second place. One more DHADAAAKK next time?']
         : place === 3 ? ['PODIUM!', 'Third place. Not bad at all, boss.']
           : place ? ['RACE OVER', 'Every Alto legend started somewhere. Chalo, again!'] : ['RESULTS', ''];
@@ -935,7 +959,7 @@ export class UI {
       li.style.setProperty('--i', i);
       const medal = el('span', 'medal' + (r.place <= 3 ? ' m' + r.place : ''), r.place ?? '-');
       const nm = el('span', 'row-name');
-      nm.append(el('b', null, (r.name || 'Racer') + (r.me ? ' (you)' : '')), el('small', null, r.car || ''));
+      nm.append(el('b', null, (r.name || 'Racer') + (r.me && r.name !== 'You' ? ' (you)' : '')), el('small', null, r.car || ''));
       const tm = el('span', 'row-time');
       tm.appendChild(el('b', null, r.time != null ? fmtTime(r.time) : 'DNF'));
       const sub = [];
@@ -967,6 +991,28 @@ export class UI {
     er.textContent = '+0';
     this._earnRaf = requestAnimationFrame(step);
     $('btnRaceAgain').textContent = this.inRoom ? 'BACK TO LOBBY' : 'RACE AGAIN';
+  }
+
+  // Celebration burst behind the victory title (only when you win)
+  _confetti(on) {
+    const host = $('screen-results');
+    host?.querySelector('.confetti')?.remove();
+    if (!on || !host || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const box = el('div', 'confetti');
+    box.setAttribute('aria-hidden', 'true');
+    const colors = ['#ff9933', '#ffc533', '#ffffff', '#2ec27e', '#29e0ff', '#ff4f9a'];
+    for (let i = 0; i < 70; i++) {
+      const p = el('i');
+      p.style.left = (Math.random() * 100).toFixed(1) + '%';
+      p.style.background = colors[i % colors.length];
+      p.style.animationDelay = (Math.random() * 0.9).toFixed(2) + 's';
+      p.style.animationDuration = (2.2 + Math.random() * 1.8).toFixed(2) + 's';
+      p.style.setProperty('--dx', ((Math.random() - 0.5) * 160).toFixed(0) + 'px');
+      p.style.setProperty('--r', ((Math.random() - 0.5) * 1440).toFixed(0) + 'deg');
+      box.appendChild(p);
+    }
+    host.prepend(box);
+    setTimeout(() => box.remove(), 5200);
   }
 
   // ======================================================================

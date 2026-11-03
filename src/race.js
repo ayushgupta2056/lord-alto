@@ -5,6 +5,8 @@ import { AIDriver } from './ai.js';
 import { buildCarModel, disposeCarModel } from './carModel.js';
 import { SkidMarks } from './skids.js';
 import { CheckpointGates } from './gates.js';
+import { Hazards } from './hazards.js';
+import { Pickups } from './pickups.js';
 
 // Small deterministic hash (FNV-1a) so every client picks the same cars for checkpoint jokes
 function hash32(str) {
@@ -21,7 +23,12 @@ function makeBubble(text) { return { text, t: 0, pos: { x: 0, y: 0, z: 0 }, pop:
 function disposeBubble(scene, b) { if (b.el) b.el.remove(); b.el = null; }
 
 const RIVAL_NAMES = ['Jignesh', 'Hetal', 'Bhavin', 'Kinjal', 'Parth', 'Dhruvi', 'Chirag', 'Nirali', 'Mihir', 'Foram'];
-const CAR_RADIUS = 0.8; // two circles per car, 0.9 m ahead/behind the centre
+const CAR_RADIUS = 0.78; // three circles per car (nose, middle, tail) approximate the 3.5 x 1.5 m body
+const CAR_CIRCLES = [-1.05, 0, 1.05];
+const RESTITUTION = 0.3; // a little bounce, no pinball
+const FRICTION = 0.35; // scrape friction between bodies (Coulomb, capped by the normal impulse)
+const INERTIA = 1.25; // yaw inertia per unit mass, ~(L^2 + W^2) / 12 for an Alto
+const KNOCK = 0.55; // arcade scale on the spin a hit produces
 const DHADAAK_MIN_CLOSING = 5; // m/s closing speed needed with nitro on
 const tmpV = new THREE.Vector3();
 const ECONOMY_OVERTAKE = 25; // points per place gained
@@ -120,7 +127,7 @@ export class Race {
       const starters = { 0: 'omniE', 1: 'lordAlto', 4: 'omniE' };
       for (let i = 0; i < n; i++) {
         const def = starters[i] ? CARS.find(c => c.id === starters[i]) : pool[(i * 3 + 1) % pool.length];
-        const skill = opts.difficulty * (0.95 + (i / Math.max(1, n - 1)) * 0.09);
+        const skill = opts.difficulty * (this.track.def?.aiBoost || 1) * (0.95 + (i / Math.max(1, n - 1)) * 0.09);
         const e = this._addCar({ isAI: true, name: RIVAL_NAMES[i % RIVAL_NAMES.length], carId: def.id,
           mods: { plate: `GJ 06 ${String.fromCharCode(65 + i)}${String.fromCharCode(75 + i)} ${1000 + i * 1111}` },
           stats: { ...def.stats, nitro: 1 }, nitroMul: def.nitroMul, pid: 'ai' + i });
@@ -134,6 +141,10 @@ export class Race {
     this._setupCheckpoints();
     if (this.cps) this.gates = new CheckpointGates(this.o.scene, this.track, this.cps.all.map(cp => cp.finish ? cp : (this.cps.ints.find(x => x.id === cp.id) || cp)));
     this.skids = new SkidMarks(this.o.scene);
+    // Road hazards (competitive tracks) and nitro bottles to collect (every track)
+    const gateIdx = this.cps ? [...this.cps.ints.map(c => c.index), (this.track.N - 45) % this.track.N] : [];
+    if (this.track.def?.hazards) this.hazards = new Hazards(this.o.scene, this.track, this.track.def.hazards, gateIdx);
+    this.pickups = new Pickups(this.o.scene, this.track, [...gateIdx, ...(this.hazards ? this.hazards.items.map(h => h.index) : [])]);
     for (const c of this.cars) {
       c.phys.gripMul = opts.weather === 'rain' ? 0.82 : 1;
       c.phys.driftiness = c.def.driftiness ?? 1;
@@ -179,6 +190,8 @@ export class Race {
     }
     this.skids?.dispose();
     this.gates?.dispose();
+    this.hazards?.dispose();
+    this.pickups?.dispose();
     this.cars = [];
   }
 
@@ -236,7 +249,7 @@ export class Race {
       let ctl = { steer: 0, throttle: 0, brake: 0, nitro: false, drift: false };
       if (live && !c.finished) {
         if (c.isPlayer) ctl = input;
-        else if (c.ai) ctl = c.ai.drive(dt, c.phys, this.track, this.cars.filter(o => o !== c).map(o => o.phys), this._rubber(c));
+        else if (c.ai) ctl = c.ai.drive(dt, c.phys, this.track, this.cars.filter(o => o !== c).map(o => o.phys), this._rubber(c), this.hazards?.near(c.phys.index, 95));
       } else if (live && c.finished) {
         ctl = { steer: c.ai ? c.ai.drive(dt, c.phys, this.track, [], 0.7).steer : 0, throttle: 0.2, brake: 0, nitro: false, drift: false };
       }
@@ -245,6 +258,10 @@ export class Race {
       c.phys.step(dt, ctl, this.track);
       if (c.isPlayer && c.phys.nitroOn && !was) this.o.onEvent?.('nitro');
       if (c.isPlayer && c.phys.wallHit > 6) this.o.onEvent?.('wall', { power: Math.min(1, c.phys.wallHit / 25), pos: c.phys });
+      if (this.hazards) {
+        const hit = this.hazards.collide(c.phys);
+        if (hit > 2 && c.isPlayer) this.o.onEvent?.('hazard', { power: Math.min(1, hit / 20), pos: c.phys });
+      }
       const ang = Math.abs(c.phys.slipAngle || 0);
       if (c.phys.drifting && ang > 0.14 && c.phys.speed > 9) {
         const d = c.phys.speed * dt;
@@ -263,8 +280,16 @@ export class Race {
     }
 
     this._collisions();
+    if (live) {
+      for (const g of this.pickups.collect(this.cars.filter(c => !c.isRemote && !c.finished), this.time)) {
+        if (g.car.isPlayer) this.o.onEvent?.('pickup', { tank: g.car.phys.nitroTank, pos: g });
+      }
+    }
     this._positions();
-    if (this.gates) { this.gates.setNext(this.me.cpNext); this.gates.update(performance.now() / 1000); }
+    const tNow = performance.now() / 1000;
+    if (this.gates) { this.gates.setNext(this.me.cpNext); this.gates.update(tNow); }
+    this.hazards?.update(tNow);
+    this.pickups.update(tNow, dt);
     for (const c of this.cars) this._syncModel(c, dt);
     this._fx(dt);
 
@@ -285,8 +310,10 @@ export class Race {
   }
 
   _rubber(c) {
-    // Gentle rubber-banding so races stay close
+    // Rubber-banding so races stay close. On competitive tracks a rival that is ahead never lifts off,
+    // and one that falls behind pushes harder to catch up.
     const gap = (c.progress - this.me.progress) / this.track.N;
+    if (this.track.def?.aiBoost) return gap > 0.2 ? 0.98 : gap < -0.06 ? 1 + Math.min(0.1, -gap * 0.6) : 1;
     return gap > 0.15 ? 0.95 : gap < -0.15 ? 1.05 : 1;
   }
 
@@ -343,7 +370,7 @@ export class Race {
   }
 
   _cpHit(c, cp) {
-    if (c.isPlayer) this.o.onEvent?.('checkpoint', { name: cp.name, n: this.cps.all.indexOf(cp) + 1, total: this.cps.all.length });
+    if (c.isPlayer) this.o.onEvent?.('checkpoint', { id: cp.id, name: cp.name, msg: cp.msg, photo: cp.photo, n: this.cps.all.findIndex(x => x.id === cp.id) + 1, total: this.cps.all.length });
     if (!cp.msg || !JOKE_CARS.has(c.def.id)) return;
     // Deterministic pick: about half of the eligible cars show the joke each time
     if (hash32(this.seed + '|' + c.pid + '|' + cp.id + '|' + c.cpLaps) % 100 >= 50) return;
@@ -394,6 +421,10 @@ export class Race {
     if (c.isPlayer) this.o.onEvent?.('respawn');
   }
 
+  // Car-to-car contact: impulse solver with a little bounce, scrape friction and a yaw kick from where the
+  // hit lands (clip a rear corner and the car twists; a square rear-end just shoves it). Each car is three
+  // circles along its length. Remote cars are not moved here; their own client applies their half of the
+  // same impulse, so both sides of an online crash feel the same.
   _collisions() {
     const cars = this.cars;
     const now = this.time;
@@ -401,37 +432,58 @@ export class Race {
       const A = cars[a], B = cars[b];
       if (A.isRemote && B.isRemote) continue;
       const pa = A.phys, pb = B.phys;
-      if (Math.abs(pa.x - pb.x) > 5 || Math.abs(pa.z - pb.z) > 5) continue;
-      // Closest pair of the two circles on each car
+      if (Math.abs(pa.x - pb.x) > 4.6 || Math.abs(pa.z - pb.z) > 4.6) continue;
+      // Deepest overlapping pair of circles
       let best = null;
-      for (const sa of [-0.9, 0.9]) for (const sb of [-0.9, 0.9]) {
-        const ax = pa.x + Math.sin(pa.h) * sa, az = pa.z + Math.cos(pa.h) * sa;
-        const bx = pb.x + Math.sin(pb.h) * sb, bz = pb.z + Math.cos(pb.h) * sb;
+      const fax = Math.sin(pa.h), faz = Math.cos(pa.h), fbx = Math.sin(pb.h), fbz = Math.cos(pb.h);
+      for (const sa of CAR_CIRCLES) for (const sb of CAR_CIRCLES) {
+        const ax = pa.x + fax * sa, az = pa.z + faz * sa;
+        const bx = pb.x + fbx * sb, bz = pb.z + fbz * sb;
         const dx = bx - ax, dz = bz - az, d = Math.hypot(dx, dz);
-        if (d < CAR_RADIUS * 2 && (!best || d < best.d)) best = { d, nx: dx / (d || 1), nz: dz / (d || 1) };
+        if (d < CAR_RADIUS * 2 && (!best || d < best.d)) best = { d, ax, az, nx: dx / (d || 1), nz: dz / (d || 1) };
       }
       if (!best) continue;
       const { nx, nz } = best;
       const overlap = CAR_RADIUS * 2 - best.d;
-      const closing = (pa.vx - pb.vx) * nx + (pa.vz - pb.vz) * nz; // > 0 = A moving into B
-      // Separate (remote cars are immovable locally; only push the local one)
-      const wa = A.isRemote ? 0 : B.isRemote ? 1 : 0.5, wb = 1 - wa;
-      pa.x -= nx * overlap * wa; pa.z -= nz * overlap * wa;
-      pb.x += nx * overlap * wb; pb.z += nz * overlap * wb;
+      // Contact point (on A's circle surface) and its offset from each car's centre
+      const cx = best.ax + nx * CAR_RADIUS, cz = best.az + nz * CAR_RADIUS;
+      const rax = cx - pa.x, raz = cz - pa.z, rbx = cx - pb.x, rbz = cz - pb.z;
+      const rvx = pb.vx - pa.vx, rvz = pb.vz - pa.vz;
+      const vn = rvx * nx + rvz * nz; // < 0 = closing
+      const closing = -vn;
+      // Positional fix: soft and shared (80% per step), so cars neither jitter nor glue together
+      const corr = Math.max(0, overlap - 0.02) * 0.8;
+      const wa = A.isRemote ? 0 : 0.5, wb = B.isRemote ? 0 : 0.5;
+      pa.x -= nx * corr * wa; pa.z -= nz * corr * wa;
+      pb.x += nx * corr * wb; pb.z += nz * corr * wb;
       if (closing > 0) {
-        const j = closing * 0.9;
-        if (!A.isRemote) { pa.vx -= nx * j * (B.isRemote ? 1 : 0.5); pa.vz -= nz * j * (B.isRemote ? 1 : 0.5); }
-        if (!B.isRemote) { pb.vx += nx * j * (A.isRemote ? 1 : 0.5); pb.vz += nz * j * (A.isRemote ? 1 : 0.5); }
+        // Equal masses: normal impulse that leaves them separating at RESTITUTION x the closing speed
+        const jn = (1 + RESTITUTION) * closing / 2;
+        // Friction along the contact, at most FRICTION x jn and never more than evens out the sliding
+        let tx = rvx - vn * nx, tz = rvz - vn * nz;
+        const vt = Math.hypot(tx, tz);
+        const jt = vt > 1e-3 ? Math.min(FRICTION * jn, vt / 2) : 0;
+        if (vt > 1e-3) { tx /= vt; tz /= vt; }
+        // Impulse on B (A gets the opposite). The friction part drags B toward A's sliding motion.
+        const Jx = nx * jn - tx * jt, Jz = nz * jn - tz * jt;
+        // Yaw kick: torque of the impulse about the car centre (generalised force for heading h)
+        const kick = (rx, rz, jx, jz) => Math.max(-3, Math.min(3, (jx * rz - jz * rx) / INERTIA * KNOCK));
+        if (!A.isRemote) { pa.vx -= Jx; pa.vz -= Jz; pa.kick += kick(rax, raz, -Jx, -Jz); }
+        if (!B.isRemote) { pb.vx += Jx; pb.vz += Jz; pb.kick += kick(rbx, rbz, Jx, Jz); }
       }
       // DHADAAAKK: ramming another car with nitro on
       const key = A.pid + '|' + B.pid;
       if ((this.pairCooldown.get(key) || -9) > now - 1.5) continue;
-      const aFacing = Math.sin(pa.h) * nx + Math.cos(pa.h) * nz;
-      const bFacing = -(Math.sin(pb.h) * nx + Math.cos(pb.h) * nz);
+      const aFacing = fax * nx + faz * nz;
+      const bFacing = -(fbx * nx + fbz * nz);
       let attacker = null, victim = null, dir = null;
       if (pa.nitroOn && aFacing > 0.4 && closing > DHADAAK_MIN_CLOSING) { attacker = A; victim = B; dir = [nx, nz]; }
       else if (pb.nitroOn && bFacing > 0.4 && closing > DHADAAK_MIN_CLOSING) { attacker = B; victim = A; dir = [-nx, -nz]; }
-      if (!attacker) { if (closing > 3) this.o.onEvent?.('bump', { power: Math.min(1, closing / 20), pos: pa, mine: A.isPlayer || B.isPlayer }); continue; }
+      if (!attacker) {
+        // one bump sound per contact, not one per physics step while they rub
+        if (closing > 3) { this.pairCooldown.set(key, now - 1.2); this.o.onEvent?.('bump', { power: Math.min(1, closing / 20), pos: pa, mine: A.isPlayer || B.isPlayer }); }
+        continue;
+      }
       // In multiplayer only the attacker's own client decides, so every hit is counted once
       if (attacker.isRemote) continue;
       this.pairCooldown.set(key, now);

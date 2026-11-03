@@ -11,11 +11,11 @@ export class AIDriver {
   }
 
   // Returns controls for `phys` on `track`. `others` = other CarPhysics to steer around.
-  drive(dt, phys, track, others, rubber = 1) {
+  // `hazards` = static obstacles ahead (cows, barricades) to swerve around early.
+  drive(dt, phys, track, others, rubber = 1, hazards = null) {
     const N = track.N;
     const v = Math.max(0, phys.forwardSpeed);
-    const look = Math.min(40, 7 + v * 0.55);
-    const ti = (phys.index + Math.round(look)) % N;
+    let look = Math.min(40, 7 + v * 0.55);
 
     // Avoid the car directly ahead by shifting lane
     let lane = this.lane;
@@ -25,7 +25,30 @@ export class AIDriver {
       const side = dx * Math.cos(phys.h) - dz * Math.sin(phys.h);
       if (ahead > 0 && ahead < 14 && Math.abs(side) < 2.4) lane = o.lateral > 0 ? -3 : 3;
     }
-    lane = Math.max(-track.halfWidth + 2, Math.min(track.halfWidth - 2, lane));
+    // Static hazards: pick the lane on the far side well before reaching them (sharper drivers react earlier)
+    let dodge = false;
+    if (hazards) {
+      const reach = 15 + v * (1.6 + (this.skill - 0.9) * 2);
+      let nearest = Infinity;
+      for (const o of hazards) {
+        const dx = o.x - phys.x, dz = o.z - phys.z;
+        const ahead = dx * Math.sin(phys.h) + dz * Math.cos(phys.h);
+        if (ahead < -1 || ahead > reach || ahead > nearest) continue;
+        const myLat = phys.lateral; // lane we are holding now
+        const clear = o.r + 2.2;
+        if (Math.abs(lane - o.lateral) < clear || Math.abs(myLat - o.lateral) < clear) {
+          nearest = ahead; dodge = true;
+          const room = track.halfWidth - 1.3;
+          const left = o.lateral - (clear + 0.3), right = o.lateral + (clear + 0.3);
+          // go round on the roomier side, preferring the side we are already on
+          const fitsR = right <= room, fitsL = left >= -room;
+          lane = fitsR && (!fitsL || myLat > o.lateral) ? right : fitsL ? left : (o.lateral < 0 ? room : -room);
+        }
+      }
+    }
+    lane = Math.max(-track.halfWidth + 1.3, Math.min(track.halfWidth - 1.3, lane));
+    if (dodge) look = Math.min(look, 6 + v * 0.3); // aim at a nearer point so the swerve is decisive
+    const ti = (phys.index + Math.round(look)) % N;
     const tx = track.tx[ti], tz = track.tz[ti];
     const px = track.x[ti] + tz * lane, pz = track.z[ti] - tx * lane;
     const want = Math.atan2(px - phys.x, pz - phys.z);

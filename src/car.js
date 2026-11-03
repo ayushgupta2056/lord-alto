@@ -14,6 +14,7 @@ export class CarPhysics {
     this.x = 0; this.z = 0; this.h = 0;
     this.vx = 0; this.vz = 0;
     this.yaw = 0;
+    this.kick = 0; // extra body rotation (rad/s) from a knock: a clipped corner twists the car, then grip catches it
     this.steer = 0; // smoothed wheel angle input -1..1
     this.nitroTank = 0.35;
     this.nitroOn = false;
@@ -34,7 +35,7 @@ export class CarPhysics {
 
   place(x, z, h) {
     this.x = x; this.z = z; this.h = h;
-    this.vx = this.vz = this.yaw = 0; this.spin = 0; this.driftBlend = 0;
+    this.vx = this.vz = this.yaw = this.kick = 0; this.spin = 0; this.driftBlend = 0;
   }
 
   // ctl: { steer, throttle, brake, nitro, drift }
@@ -133,6 +134,13 @@ export class CarPhysics {
     this.vz = nfz * vF + nrz * vR;
     this.x += this.vx * dt;
     this.z += this.vz * dt;
+    // Knock rotation turns the body but not the velocity, so the car ends up a little sideways and the tyres
+    // pull it straight again (a natural fishtail instead of an instant snap)
+    if (this.kick) {
+      this.h += this.kick * dt;
+      this.kick *= Math.exp(-6 * dt);
+      if (Math.abs(this.kick) < 0.01) this.kick = 0;
+    }
 
     // Track edges
     this.wallHit = 0;

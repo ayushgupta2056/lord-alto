@@ -643,6 +643,17 @@ export class GameAudio {
     this._sweep('sine', 2400, 5600, t + 0.05, 0.6, 0.035, this.sfx, 0.08, 0.5);
   }
 
+  /** Nitro bottle grabbed: a quick bright rising chime with a little shimmer. */
+  pickup() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime + 0.003;
+    [880, 1318.5, 1760].forEach((f, i) => {
+      this._tone('triangle', f, t + i * 0.045, 0.16, 0.13, this.sfx, 0.002);
+      this._tone('sine', f * 2, t + i * 0.045, 0.2, 0.04, this.verbSend, 0.002);
+    });
+    this._sweep('sine', 1200, 3600, t, 0.22, 0.035, this.sfx, 0.01, 0.2);
+  }
+
   countdown(final) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime + 0.005;

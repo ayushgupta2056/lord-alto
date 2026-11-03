@@ -267,17 +267,19 @@ function onRaceEvent(type, d) {
     case 'respawn': ui.toast('Back on the road'); break;
     case 'overtake': ui.popup?.(`+${d.points} ${d.count > 1 ? (d.count === 2 ? 'DOUBLE ' : 'TRIPLE ') : ''}OVERTAKE`, 'good'); break;
     case 'driftbank': ui.popup?.(`+${d.points} DRIFT${d.combo >= 1.5 ? ' x' + d.combo.toFixed(1) : ''} · ${d.meters} m`, 'nitro'); break;
-    case 'checkpoint': ui.popup?.(`✓ ${d.name}  ${d.n}/${d.total}`, 'good'); audio.lapDing(); break;
+    case 'checkpoint': ui.cpPhoto({ ...d, final: d.n === d.total && race && race.me.lap >= race.laps }); audio.lapDing(); break;
+    case 'pickup': audio.pickup?.(); ui.popup?.(d.tank >= 0.99 ? 'NITRO FULL' : '+NITRO', 'nitro'); break;
+    case 'hazard': audio.crash(0.3 + d.power * 0.5); shake = Math.max(shake, 0.2 + d.power * 0.4); if (d.power > 0.25) ui.toast?.(Math.random() < 0.5 ? 'Arre! Dhyan se, boss 😵' : 'Road pe dekh ke chala! 🐄🚧'); break;
   }
 }
 
 let resultsShown = false;
-// Meme victory title when the winner drove a Lord Alto or an Omni E
+// Meme victory title for the winner: every car has its own (TRU LORD, CERTIFIED KIDNAPER, CNG KA KING...)
 function winTitle(rows) {
   const w = [...rows].sort((a, b) => (a.place || 99) - (b.place || 99))[0];
   if (!w || w.place !== 1) return null;
   const def = CARS.find(c => c.id === w.carId);
-  return def && def.winTitle ? { title: def.winTitle, name: w.me ? 'You' : w.name, car: def.name } : null;
+  return { title: def?.winTitle || '🏆 BARODA KA BOSS 😎', name: w.me ? 'You' : w.name, car: def?.name || w.car || 'Alto', me: !!w.me };
 }
 function showResults(mpRows) {
   if (!race) return;

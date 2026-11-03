@@ -10,28 +10,28 @@ export const BRAND = {
 // shape.gen: 'gen1' (2000 tall boxy), 'gen1f' (2005 facelift), 'gen2' (2010-2019 800/K10), 'gen3' (2022 rounded)
 export const CARS = [
   { id: 'alto2000', name: 'Alto Classic', era: '2000', tagline: 'The OG. Light, tall and twitchy', price: 0,
-    stats: { speed: 0.95, accel: 1.0, handling: 1.05 }, nitroMul: 1.0,
+    stats: { speed: 0.95, accel: 1.0, handling: 1.05 }, nitroMul: 1.0, winTitle: '🦖 OG BOSS OF BARODA 😤',
     shape: { gen: 'gen1', length: 3.5, width: 1.49, height: 1.46 }, paint: '#d8dde3' },
   { id: 'altoLxi', name: 'Alto LXi', era: '2005', tagline: 'The balanced daily driver', price: 0,
-    stats: { speed: 0.97, accel: 1.0, handling: 1.02 }, nitroMul: 1.0,
+    stats: { speed: 0.97, accel: 1.0, handling: 1.02 }, nitroMul: 1.0, winTitle: '🛵 DAILY DRIVER DON 😎',
     shape: { gen: 'gen1f', length: 3.5, width: 1.49, height: 1.46 }, paint: '#b3121d' },
   { id: 'alto800', name: 'Alto 800', era: '2012', tagline: 'Cheap, cheerful, grippy', price: 1500,
-    stats: { speed: 0.96, accel: 0.98, handling: 1.08 }, nitroMul: 1.0,
+    stats: { speed: 0.96, accel: 0.98, handling: 1.08 }, nitroMul: 1.0, winTitle: '💸 SASTA NAHI, SOLID HAI 🔥',
     shape: { gen: 'gen2', length: 3.43, width: 1.49, height: 1.47 }, paint: '#f2f2f0' },
   { id: 'k10gen1', name: 'Alto K10', era: '2010', tagline: 'The first pocket rocket', price: 2000,
-    stats: { speed: 1.03, accel: 1.08, handling: 0.98 }, nitroMul: 1.0,
+    stats: { speed: 1.03, accel: 1.08, handling: 0.98 }, nitroMul: 1.0, winTitle: '🚀 POCKET ROCKET RAJA 👑',
     shape: { gen: 'gen2', length: 3.62, width: 1.49, height: 1.46 }, paint: '#1f4fa8' },
   { id: 'alto800bs6', name: 'Alto 800 BS6', era: '2019', tagline: 'Eco tuned, efficient nitro', price: 3000,
-    stats: { speed: 0.98, accel: 1.02, handling: 1.04 }, nitroMul: 1.2,
+    stats: { speed: 0.98, accel: 1.02, handling: 1.04 }, nitroMul: 1.2, winTitle: '🌱 ECO KA BAAP 😤',
     shape: { gen: 'gen2', length: 3.45, width: 1.49, height: 1.47, facelift: true }, paint: '#9aa3ad' },
   { id: 'k10ags', name: 'Alto K10 AGS', era: '2014', tagline: 'Smooth auto box, easy drifts', price: 4000,
-    stats: { speed: 1.02, accel: 1.04, handling: 1.06 }, nitroMul: 1.0,
+    stats: { speed: 1.02, accel: 1.04, handling: 1.06 }, nitroMul: 1.0, winTitle: '🤖 AUTOMATIC AASHIQ 💘',
     shape: { gen: 'gen2', length: 3.55, width: 1.49, height: 1.47, facelift: true }, paint: '#e5601d' },
   { id: 'altoCng', name: 'Alto S-CNG', era: '2016', tagline: 'Slow top end, huge nitro tank', price: 5000,
-    stats: { speed: 0.94, accel: 1.0, handling: 1.03 }, nitroMul: 1.5,
+    stats: { speed: 0.94, accel: 1.0, handling: 1.03 }, nitroMul: 1.5, winTitle: '⛽ CNG KA KING 🔥',
     shape: { gen: 'gen2', length: 3.45, width: 1.49, height: 1.47 }, paint: '#2e8b57' },
   { id: 'k10gen3', name: 'Alto K10 (New)', era: '2022', tagline: 'The best all-rounder', price: 8000,
-    stats: { speed: 1.06, accel: 1.08, handling: 1.05 }, nitroMul: 1.0,
+    stats: { speed: 1.06, accel: 1.08, handling: 1.05 }, nitroMul: 1.0, winTitle: '⚡ NAYA NAWAB 😎',
     shape: { gen: 'gen3', length: 3.53, width: 1.49, height: 1.52 }, paint: '#c8102e' },
 ];
 
@@ -79,15 +79,17 @@ export const TRACKS = [
   {
     id: 'brightday', name: 'SCHOOL SE GHAR TAK', short: 'School Se Ghar Tak', city: 'Vadodara',
     tagline: 'Petals → Shangri La → ADDA → Vidhi Collection → Bright Day School → back to Petals, on the real Vasna-Bhayli roads',
-    targetLength: 3300, halfWidth: 8, timeOfDay: 'day', style: 'suburb',
+    targetLength: 3300, halfWidth: 6.5, timeOfDay: 'day', style: 'suburb',
+    // Competitive tuning: a narrower, twistier road, faster rivals, and cows + police barricades to dodge
+    wiggle: { every: 105, amp: 0.1, max: 34 }, aiBoost: 1.1, hazards: { every: 120 },
     // Ordered checkpoints: cross them in this order every lap; Petals is the finish line (sample 0).
     // msg = the in-joke bubble shown above a few Lord Altos / Omni Es when they pass it.
     checkpoints: [
-      { id: 'shangrila', name: 'Shangri La', msg: 'Chinese Samosa 🥟' },
-      { id: 'adda', name: 'ADDA 🫂', msg: 'Chalo Terrace Pe 😎' },
-      { id: 'vidhi', name: 'Vidhi Collection', msg: null },
-      { id: 'brightday', name: 'Bright Day School CBSE', msg: 'Sabse Pyara School Hamara 🏫❤️' },
-      { id: 'petals', name: 'Petals 🚬', msg: 'Fukte Hai Chalo 💀🚬', finish: true },
+      { id: 'shangrila', photo: 'full-shangrila.jpg', name: 'Shangri La', msg: 'Chinese Samosa 🥟' },
+      { id: 'adda', photo: 'full-adda.jpg', name: 'ADDA 🫂', msg: 'Chalo Terrace Pe 😎' },
+      { id: 'vidhi', photo: 'full-vidhi.jpg', name: 'Vidhi Collection', msg: null },
+      { id: 'brightday', photo: 'full-brightday.jpg', name: 'Bright Day School CBSE', msg: 'Sabse Pyara School Hamara 🏫❤️' },
+      { id: 'petals', photo: 'full-petals.jpg', name: 'Petals 🚬', msg: 'Fukte Hai Chalo 💀🚬', finish: true },
     ],
     // Approximate real positions: Petal Trillium on the 24 m High Tension Road (Bhayli, before Navrachana),
     // Alchemy Shangri La in Subhanpura, Bright Day School on Vasna-Bhayli Road (OSM). ADDA and Vidhi Collection
