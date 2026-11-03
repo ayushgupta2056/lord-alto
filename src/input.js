@@ -6,7 +6,7 @@ const KEYMAP = {
   ArrowRight: 'right', KeyD: 'right',
   ArrowUp: 'up', KeyW: 'up',
   ArrowDown: 'down', KeyS: 'down',
-  ShiftLeft: 'drift', ShiftRight: 'drift',
+  ShiftLeft: 'drift', ShiftRight: 'drift', KeyX: 'drift',
   Space: 'nitro', KeyN: 'nitro',
   KeyH: 'horn',
   Escape: 'pause', KeyP: 'pause',
@@ -82,13 +82,32 @@ export class Input {
     window.addEventListener('blur', this._clear);
     document.addEventListener('visibilitychange', () => { if (document.hidden) this._clear(); });
     window.addEventListener('touchstart', () => { this.isTouchDevice = true; }, { once: true, passive: true });
-    // Block pinch-zoom / double-tap zoom gestures on iOS Safari
-    document.addEventListener('gesturestart', (e) => e.preventDefault());
-    document.addEventListener('dblclick', (e) => { if (e.target.closest?.('#touch, #game')) e.preventDefault(); });
+    window.addEventListener('pagehide', this._clear);
+    this._guardGestures();
 
     // Settings from ui.js (decoupled through window events)
     window.addEventListener('lordalto:touchmode', (e) => this.setTilt(e.detail?.mode === 'tilt'));
     window.addEventListener('lordalto:tiltpermission', (e) => { if (e.detail?.granted && this.tilt) this._listenTilt(); });
+  }
+
+  /**
+   * iOS Safari ignores user-scalable=no, rubber-bands the page and pops the magnifier on long presses.
+   * Block those on the game layer (canvas, HUD, touch pads) and everywhere while racing, but leave
+   * menus scrollable (track list, garage, lobby, settings dialog).
+   */
+  _guardGestures() {
+    const racing = () => document.body.dataset.screen === 'race';
+    const onGameLayer = (t) => !!(t && t.closest && t.closest('#game, #touch, #screen-race, .countdown, .banners'));
+    const opts = { passive: false };
+    // Safari pinch-zoom (gesture* events are WebKit-only); a game never wants page zoom
+    for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, (e) => e.preventDefault(), opts);
+    document.addEventListener('touchmove', (e) => {
+      if (e.touches.length > 1 || racing() || onGameLayer(e.target)) { if (e.cancelable) e.preventDefault(); }
+    }, opts);
+    // double-tap zoom / long-press callouts on the game layer
+    document.addEventListener('dblclick', (e) => { if (racing() || onGameLayer(e.target)) e.preventDefault(); }, opts);
+    document.addEventListener('contextmenu', (e) => { if (racing() || onGameLayer(e.target)) e.preventDefault(); });
+    document.addEventListener('selectstart', (e) => { if (racing() || onGameLayer(e.target)) e.preventDefault(); });
   }
 
   /** Show/hide on-screen controls (they only render on the race screen). */
@@ -186,6 +205,7 @@ export class Input {
 
     // Multi-touch: each pointer maps to whichever button it is over (fingers can slide between buttons).
     // Rects are measured on each pointerdown (6 reads, no writes) and reused for moves; only the inner face scales.
+    // Keys are pointerId (pointer events) or 't' + touch.identifier (touch-event fallback).
     this._pointers = new Map();
     let rects = [];
     const measure = () => {
@@ -195,13 +215,19 @@ export class Input {
         if (r.width > 0) rects.push({ k: b.dataset.k, cx: r.left + r.width / 2, cy: r.top + r.height / 2, rad: r.width / 2 });
       }
     };
-    const hit = (x, y) => {
+    const hit = (x, y, held) => {
       // round buttons: nearest centre within radius + slop (steer buttons get extra slop so sliding L<->R never drops)
       let best = null, bestD = Infinity;
       for (const r of rects) {
         const d = Math.hypot(x - r.cx, y - r.cy);
         const slop = r.k === 'left' || r.k === 'right' ? 22 : 12;
         if (d <= r.rad + slop && d - r.rad < bestD) { bestD = d - r.rad; best = r.k; }
+      }
+      // Hysteresis: a held button stays held while the thumb drifts up to ~1/2 a button off its rim
+      // (sweaty thumbs creep), unless the finger has clearly moved onto another button.
+      if (!best && held) {
+        const r = rects.find((q) => q.k === held);
+        if (r && Math.hypot(x - r.cx, y - r.cy) <= r.rad * 1.5 + 18) best = held;
       }
       return best;
     };
@@ -213,35 +239,59 @@ export class Input {
       this._syncTouchClasses();
     };
     this._syncTouchClasses = () => { for (const b of this._btns) b.classList.toggle('down', !!this.touch[b.dataset.k]); };
-    const down = (e) => {
+    const press = (id, x, y) => {
       if (this.tilt && !this._tiltGranted) this.setTilt(true); // iOS: permission prompt needs a gesture
       measure();
-      const k = hit(e.clientX, e.clientY);
-      if (!k) return;
-      e.preventDefault();
-      try { root.setPointerCapture(e.pointerId); } catch { /* ignore */ }
-      this._pointers.set(e.pointerId, k);
+      const k = hit(x, y, null);
+      if (!k) return false;
+      this._pointers.set(id, k);
+      update();
+      return true;
+    };
+    const drag = (id, x, y) => {
+      if (!this._pointers.has(id)) return false;
+      const cur = this._pointers.get(id);
+      const k = hit(x, y, cur);
+      if (k !== cur) { this._pointers.set(id, k); update(); }
+      return true;
+    };
+    const release = (id) => {
+      if (!this._pointers.has(id)) return;
+      this._pointers.delete(id);
       update();
     };
-    const move = (e) => {
-      if (!this._pointers.has(e.pointerId)) return;
-      e.preventDefault();
-      const k = hit(e.clientX, e.clientY);
-      if (k !== this._pointers.get(e.pointerId)) { this._pointers.set(e.pointerId, k); update(); }
-    };
-    const up = (e) => {
-      if (!this._pointers.has(e.pointerId)) return;
-      this._pointers.delete(e.pointerId);
-      update();
-    };
-    root.addEventListener('pointerdown', down);
-    root.addEventListener('pointermove', move);
-    root.addEventListener('pointerup', up);
-    root.addEventListener('pointercancel', up);
-    root.addEventListener('lostpointercapture', up);
+    const opts = { passive: false };
+
+    if (window.PointerEvent) {
+      root.addEventListener('pointerdown', (e) => {
+        if (!press(e.pointerId, e.clientX, e.clientY)) return;
+        e.preventDefault();
+        try { root.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+      }, opts);
+      root.addEventListener('pointermove', (e) => {
+        // coalesced events would be finer, but one hit-test per frame-ish event is plenty for buttons
+        if (drag(e.pointerId, e.clientX, e.clientY)) e.preventDefault();
+      }, opts);
+      root.addEventListener('pointerup', (e) => release(e.pointerId));
+      root.addEventListener('pointercancel', (e) => release(e.pointerId));
+      root.addEventListener('lostpointercapture', (e) => release(e.pointerId));
+      // Safety net: iOS can swallow a pointerup (Control Centre swipe, notification banner). When the last
+      // finger leaves the screen, nothing can still be held.
+      root.addEventListener('touchend', (e) => { if (e.touches.length === 0 && this._pointers.size) { this._pointers.clear(); update(); } });
+      root.addEventListener('touchcancel', (e) => { if (e.touches.length === 0 && this._pointers.size) { this._pointers.clear(); update(); } });
+    } else {
+      // Touch-event fallback (iOS < 13 has no pointer events). Each touch.identifier is tracked separately.
+      const each = (e, fn) => { for (const t of e.changedTouches) fn('t' + t.identifier, t.clientX, t.clientY); };
+      root.addEventListener('touchstart', (e) => each(e, press), opts);
+      root.addEventListener('touchmove', (e) => each(e, drag), opts);
+      root.addEventListener('touchend', (e) => each(e, release), opts);
+      root.addEventListener('touchcancel', (e) => each(e, release), opts);
+    }
+    // No synthesized mouse events / clicks (no ghost clicks, no 300 ms delay), no scrolling, no zoom.
+    root.addEventListener('touchstart', (e) => { if (e.cancelable) e.preventDefault(); }, opts);
+    root.addEventListener('touchmove', (e) => { if (e.cancelable) e.preventDefault(); }, opts);
+    root.addEventListener('touchend', (e) => { if (e.cancelable) e.preventDefault(); }, opts);
     root.addEventListener('contextmenu', (e) => e.preventDefault());
-    root.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
-    root.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
   }
 
   _pollPad() {

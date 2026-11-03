@@ -33,10 +33,18 @@ export const CARS = [
   { id: 'k10gen3', name: 'Alto K10 (New)', era: '2022', tagline: 'The best all-rounder', price: 8000,
     stats: { speed: 1.06, accel: 1.08, handling: 1.05 }, nitroMul: 1.0,
     shape: { gen: 'gen3', length: 3.53, width: 1.49, height: 1.52 }, paint: '#c8102e' },
-  { id: 'lordAlto', name: 'LORD ALTO', era: 'Legend', tagline: 'Gold chrome. Glowing halo. Bow down.', price: 25000,
-    stats: { speed: 1.12, accel: 1.15, handling: 1.12 }, nitroMul: 1.3,
-    shape: { gen: 'gen3', length: 3.53, width: 1.49, height: 1.52, legend: true }, paint: '#d4af37' },
 ];
+
+// The two free starters, shown first in the garage. Balanced against each other:
+// Lord Alto = quicker and grippier, Omni E = punchier launch, bigger nitro, loves to slide (driftiness > 1).
+CARS.unshift(
+  { id: 'lordAlto', name: 'LORD ALTO', era: 'Legend', tagline: 'Gold chrome. Glowing halo. Bow down.', price: 0, starter: true,
+    stats: { speed: 1.03, accel: 1.0, handling: 1.05 }, nitroMul: 1.1, driftiness: 0.88, winTitle: '👑 TRU LORD 😎',
+    shape: { gen: 'gen3', length: 3.53, width: 1.49, height: 1.52, legend: true }, paint: '#d4af37' },
+  { id: 'omniE', name: 'OMNI E', era: '1984–2019', tagline: 'Sliding doors, zero fear. The van everyone knows.', price: 0, starter: true,
+    stats: { speed: 0.99, accel: 1.05, handling: 0.98 }, nitroMul: 1.2, driftiness: 1.3, winTitle: '🚐 CERTIFIED KIDNAPER 💀',
+    shape: { gen: 'omni', length: 3.37, width: 1.40, height: 1.64 }, paint: '#f4f4f0' },
+);
 
 export const PAINTS = ['#d8dde3', '#f2f2f0', '#1b1b1f', '#b3121d', '#c8102e', '#1f4fa8', '#2e8b57', '#e5601d', '#f6c62a', '#7b2cbf', '#ff4f9a', '#00b4d8', '#9aa3ad', '#d4af37'];
 export const RIMS = ['#c0c4c8', '#1b1b1f', '#d4af37', '#e5601d', '#00b4d8', '#ffffff'];
@@ -69,19 +77,32 @@ export const ECONOMY = {
 // and smooths them into a closed spline. meta.landmark names a hero model placed beside that point.
 export const TRACKS = [
   {
-    id: 'brightday', name: 'BRIGHT DAY CIRCUIT', short: 'Bright Day', city: 'Vadodara',
-    tagline: 'From the Bright Day School (CBSE) gate on Vasna-Bhayli Road, through Natubhai Circle, Gotri and Sevasi',
-    targetLength: 2600, halfWidth: 8, timeOfDay: 'day', style: 'suburb',
+    id: 'brightday', name: 'SCHOOL SE GHAR TAK', short: 'School Se Ghar Tak', city: 'Vadodara',
+    tagline: 'Petals → Shangri La → ADDA → Vidhi Collection → Bright Day School → back to Petals, on the real Vasna-Bhayli roads',
+    targetLength: 3300, halfWidth: 8, timeOfDay: 'day', style: 'suburb',
+    // Ordered checkpoints: cross them in this order every lap; Petals is the finish line (sample 0).
+    // msg = the in-joke bubble shown above a few Lord Altos / Omni Es when they pass it.
+    checkpoints: [
+      { id: 'shangrila', name: 'Shangri La', msg: 'Chinese Samosa 🥟' },
+      { id: 'adda', name: 'ADDA 🫂', msg: 'Chalo Terrace Pe 😎' },
+      { id: 'vidhi', name: 'Vidhi Collection', msg: null },
+      { id: 'brightday', name: 'Bright Day School CBSE', msg: 'Sabse Pyara School Hamara 🏫❤️' },
+      { id: 'petals', name: 'Petals 🚬', msg: 'Fukte Hai Chalo 💀🚬', finish: true },
+    ],
+    // Approximate real positions: Petal Trillium on the 24 m High Tension Road (Bhayli, before Navrachana),
+    // Alchemy Shangri La in Subhanpura, Bright Day School on Vasna-Bhayli Road (OSM). ADDA and Vidhi Collection
+    // are not on public maps, so they sit on the Vasna side of the loop as reasonable approximations.
     waypoints: [
-      [22.29079, 73.13373, { mark: 'start', landmark: 'brightday', label: 'BRIGHT DAY SCHOOL' }],
-      [22.29300, 73.13900, { label: 'VASNA-BHAYLI ROAD' }],
+      [22.29500, 73.12250, { mark: 'start', landmark: 'petals', label: 'PETALS' }],
+      [22.30500, 73.13000, { label: 'HIGH TENSION ROAD' }],
+      [22.31300, 73.14200],
+      [22.32139, 73.15498, { landmark: 'shangrila', label: 'SUBHANPURA' }],
+      [22.31200, 73.15300],
+      [22.30600, 73.15000, { landmark: 'adda', label: 'VASNA' }],
       [22.29485, 73.14554, { label: 'VASNA ROAD' }],
-      [22.30200, 73.15300],
-      [22.30999, 73.15865, { landmark: 'circle', label: 'NATUBHAI CIRCLE' }],
-      [22.31424, 73.13881, { label: 'GOTRI', landmark: 'mall' }],
-      [22.31842, 73.11937, { label: 'SEVASI' }],
-      [22.30500, 73.12100],
-      [22.29052, 73.12697, { label: 'BHAYLI' }],
+      [22.29250, 73.14000, { landmark: 'vidhi', label: 'VASNA-BHAYLI ROAD' }],
+      [22.29079, 73.13373, { landmark: 'brightday', label: 'BRIGHT DAY SCHOOL' }],
+      [22.28950, 73.12700, { label: 'BHAYLI' }],
     ],
   },
   {
@@ -117,7 +138,52 @@ export const TRACKS = [
   },
 ];
 
+// More circuits, laid out the same way from OpenStreetMap coordinates.
+TRACKS.push(
+  {
+    id: 'eme', name: 'EME TEMPLE – FATEHGUNJ', short: 'EME Temple', city: 'Vadodara',
+    tagline: 'Kala Ghoda Circle, the MSU Faculty of Arts dome, Nizampura, the aluminium EME Temple and Fatehgunj',
+    targetLength: 2600, halfWidth: 8, timeOfDay: 'day', style: 'cantonment',
+    waypoints: [
+      [22.30894, 73.18808, { mark: 'start', landmark: 'circle', label: 'KALA GHODA CIRCLE' }],
+      [22.30991, 73.18546, { landmark: 'msu', label: 'MSU FACULTY OF ARTS' }],
+      [22.32000, 73.18150],
+      [22.32886, 73.18257, { label: 'NIZAMPURA' }],
+      [22.33161, 73.19170, { landmark: 'eme', label: 'EME TEMPLE' }],
+      [22.32395, 73.18854, { label: 'FATEHGUNJ' }],
+      [22.31600, 73.19000],
+    ],
+  },
+  {
+    id: 'harni', name: 'SAMA – HARNI AIRPORT', short: 'Harni Airport', city: 'Vadodara',
+    tagline: 'Amit Nagar Circle, past Vadodara Airport, round Harni Motnath lake, through Sama and Karelibaug',
+    targetLength: 3000, halfWidth: 9, timeOfDay: 'sunset', style: 'outskirts',
+    waypoints: [
+      [22.32748, 73.20748, { mark: 'start', landmark: 'circle', label: 'AMIT NAGAR CIRCLE' }],
+      [22.33661, 73.21752, { label: 'HARNI' }],
+      [22.33675, 73.22710, { landmark: 'airport', label: 'VADODARA AIRPORT' }],
+      [22.34446, 73.21921, { landmark: 'harnilake', label: 'HARNI MOTNATH LAKE' }],
+      [22.34252, 73.20203, { label: 'SAMA' }],
+      [22.31831, 73.20152, { label: 'KARELIBAUG' }],
+    ],
+  },
+  {
+    id: 'makarpura', name: 'MAKARPURA – MANJALPUR', short: 'Makarpura', city: 'Vadodara',
+    tagline: 'Susen Circle, Tarsali, Manjalpur, Makarpura Palace and the GIDC factories, at night',
+    targetLength: 2700, halfWidth: 8, timeOfDay: 'night', style: 'industrial',
+    waypoints: [
+      [22.25731, 73.19911, { mark: 'start', landmark: 'circle', label: 'SUSEN CIRCLE' }],
+      [22.25648, 73.20788, { label: 'TARSALI' }],
+      [22.27000, 73.20800],
+      [22.27587, 73.18793, { label: 'MANJALPUR' }],
+      [22.26600, 73.19000, { landmark: 'makarpura', label: 'MAKARPURA PALACE' }],
+      [22.25878, 73.18963, { label: 'MAKARPURA GIDC' }],
+    ],
+  },
+);
+
 export const LAPS = [1, 3, 5];
+export const WEATHERS = ['clear', 'rain'];
 export const DIFFICULTY = { easy: 0.86, normal: 0.95, hard: 1.03 };
 export const MAX_RACERS = 8;
 export const TIMES = ['day', 'sunset', 'night'];

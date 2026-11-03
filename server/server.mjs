@@ -39,6 +39,7 @@ const TRACK_IDS = new Set(TRACKS.map((t) => t.id));
 const CAR_IDS = new Set(CARS.map((c) => c.id));
 const LAP_SET = new Set(LAPS);
 const TIME_SET = new Set(TIMES);
+const WEATHER_SET = new Set(['clear', 'rain']);
 const SPOILER_SET = new Set(SPOILERS);
 const STICKER_SET = new Set(STICKERS);
 
@@ -117,7 +118,7 @@ class Room {
     this.pin = pin;
     this.host = null;
     this.phase = 'lobby';
-    this.settings = { track: TRACKS[0].id, laps: LAPS.includes(3) ? 3 : LAPS[0], timeOfDay: TRACKS[0].timeOfDay || TIMES[0] };
+    this.settings = { track: TRACKS[0].id, laps: LAPS.includes(3) ? 3 : LAPS[0], timeOfDay: TRACKS[0].timeOfDay || TIMES[0], weather: 'clear' };
     /** @type {Map<string, Player>} insertion order = join order */
     this.players = new Map();
     this.race = null;
@@ -241,6 +242,7 @@ function startRace(room) {
     track: room.settings.track,
     laps: room.settings.laps,
     timeOfDay: room.settings.timeOfDay,
+    weather: room.settings.weather || 'clear',
     grid,
     entries,
     startAt: null,
@@ -256,7 +258,7 @@ function startRace(room) {
 
 function prepareMsg(room) {
   const r = room.race;
-  return { t: 'prepare', track: r.track, laps: r.laps, timeOfDay: r.timeOfDay, grid: r.grid, startAt: r.startAt };
+  return { t: 'prepare', track: r.track, laps: r.laps, timeOfDay: r.timeOfDay, weather: r.weather || 'clear', grid: r.grid, startAt: r.startAt };
 }
 
 function checkLoaded(room) {
@@ -409,6 +411,10 @@ const handlers = {
     if (s.timeOfDay !== undefined) {
       if (!TIME_SET.has(s.timeOfDay)) return sendErr(ws, 'bad_time', 'Invalid time of day.', rid);
       room.settings.timeOfDay = s.timeOfDay;
+    }
+    if (s.weather !== undefined) {
+      if (!WEATHER_SET.has(s.weather)) return sendErr(ws, 'bad_weather', 'Invalid weather.', rid);
+      room.settings.weather = s.weather;
     }
     room.broadcastRoom();
   },

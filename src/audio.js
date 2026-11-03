@@ -35,6 +35,21 @@ const SHIFT_CUT = 0.08; // s of throttle cut on an upshift
 const SHIFT_GAP = 0.28; // min s between shifts
 const rpmInGear = (g, s) => RED_RPM * Math.pow(s / GEAR_TOP[g - 1], GEAR_CURVE);
 
+let _silentUrl = null;
+/** A tiny looping-safe silent WAV (0.25 s, 8 kHz, 8-bit mono), built once as a blob URL. */
+function silentWavUrl() {
+  if (_silentUrl) return _silentUrl;
+  const n = 2000, buf = new ArrayBuffer(44 + n), v = new DataView(buf);
+  const str = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  str(0, 'RIFF'); v.setUint32(4, 36 + n, true); str(8, 'WAVE'); str(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+  str(36, 'data'); v.setUint32(40, n, true);
+  for (let i = 0; i < n; i++) v.setUint8(44 + i, 128);
+  _silentUrl = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+  return _silentUrl;
+}
+
 function readMuted() { try { return localStorage.getItem(MUTE_KEY) === '1'; } catch { return false; } }
 const nowS = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
 
@@ -63,15 +78,78 @@ export class GameAudio {
         this._screen = e.detail?.screen || null;
         this.music(MUSIC_SCREENS.has(this._screen));
       });
-      document.addEventListener('visibilitychange', () => {
-        if (!this.ctx) return;
-        if (document.hidden) this.ctx.suspend().catch(() => {});
-        else this.ctx.resume().catch(() => {});
-      });
+      this._installLifecycle();
     }
   }
 
   // ------------------------------------------------------------------ setup
+  /**
+   * iOS Safari rules this has to live with:
+   *  - an AudioContext only starts/resumes inside a real user activation: touchend / pointerup / click / keydown
+   *    (NOT touchstart / pointerdown), so we listen to all of them, for the whole session;
+   *  - it suspends when the page is hidden and goes 'interrupted' after a call, Siri or an alarm, and it does
+   *    not always come back by itself;
+   *  - Web Audio is silenced by the ring/silent switch unless the audio session is 'playback'.
+   */
+  _installLifecycle() {
+    const onGesture = () => {
+      if (document.hidden) return;
+      if (!this.ctx) { this.unlock(); return; }
+      if (this.ctx.state !== 'running') this.unlock();
+      else this._unlockMediaSession();
+    };
+    for (const ev of ['touchend', 'pointerup', 'click', 'keydown']) window.addEventListener(ev, onGesture, { capture: true, passive: true });
+    const wake = () => { if (!document.hidden) this._resume(); };
+    document.addEventListener('visibilitychange', () => {
+      if (!this.ctx) return;
+      if (document.hidden) {
+        this._hiddenSuspend = true;
+        this.ctx.suspend().catch(() => {});
+        this._silentEl?.pause();
+      } else {
+        this._hiddenSuspend = false;
+        wake();
+      }
+    });
+    window.addEventListener('pageshow', wake);
+    window.addEventListener('focus', wake);
+    window.addEventListener('pagehide', () => { this._silentEl?.pause(); });
+  }
+
+  /** Best-effort resume without a gesture (works after interruptions on most iOS versions; else the next tap does it). */
+  _resume() {
+    const c = this.ctx;
+    if (!c || this._hiddenSuspend || c.state === 'running' || c.state === 'closed') return;
+    c.resume().catch(() => {});
+  }
+
+  /** iOS: route Web Audio through the 'playback' session so the silent switch does not mute the game. */
+  _unlockMediaSession() {
+    try {
+      const s = navigator.audioSession; // Safari 16.4+
+      if (s && 'type' in s) {
+        if (s.type !== 'playback') s.type = 'playback';
+        return;
+      }
+    } catch { /* ignore */ }
+    // Older iOS: keep a silent <audio> element playing; that switches the page to the playback category.
+    const isIOS = /iP(hone|od|ad)/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+    if (!isIOS || document.hidden) return;
+    try {
+      if (!this._silentEl) {
+        const a = document.createElement('audio');
+        a.setAttribute('x-webkit-airplay', 'deny');
+        a.setAttribute('playsinline', '');
+        a.disableRemotePlayback = true;
+        a.preload = 'auto';
+        a.loop = true;
+        a.src = silentWavUrl();
+        this._silentEl = a;
+      }
+      if (this._silentEl.paused) this._silentEl.play().catch(() => {});
+    } catch { /* ignore */ }
+  }
+
   unlock() {
     try {
       if (!this.ctx) {
@@ -79,12 +157,24 @@ export class GameAudio {
         if (!AC) return;
         this.ctx = new AC({ latencyHint: 'interactive' });
         this._build();
-        // iOS needs a sound started inside the gesture
+        // 'interrupted' (iOS: call / Siri / alarm) or a suspend we did not ask for: try to come back
+        this.ctx.onstatechange = () => {
+          const st = this.ctx?.state;
+          if (st === 'interrupted' || (st === 'suspended' && !this._hiddenSuspend && !document.hidden)) {
+            clearTimeout(this._resumeT);
+            this._resumeT = setTimeout(() => this._resume(), 300);
+          }
+        };
+      }
+      this._unlockMediaSession();
+      if (this.ctx.state !== 'running') {
+        // iOS needs a sound started inside the gesture: a 1-sample silent buffer
         const b = this.ctx.createBuffer(1, 1, 22050);
         const s = this.ctx.createBufferSource();
         s.buffer = b; s.connect(this.ctx.destination); s.start(0);
+        this._hiddenSuspend = false;
+        this.ctx.resume().catch(() => {});
       }
-      if (this.ctx.state !== 'running') this.ctx.resume().catch(() => {});
       if (this._musicWanted) this._startMusic();
     } catch (e) {
       console.warn('[audio] unavailable', e);

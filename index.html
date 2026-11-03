@@ -2,8 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="theme-color" content="#1d1747">
+  <meta name="color-scheme" content="dark">
+  <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
   <meta name="description" content="Lord Alto: Baroda Grand Prix. Race India's favourite small car through the streets of Vadodara, solo or with up to 8 friends.">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -11,14 +13,16 @@
   <meta name="apple-mobile-web-app-title" content="Lord Alto">
   <title>Lord Alto: Baroda Grand Prix</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="/icon-192.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Bungee&display=swap">
   <style>
     /* critical: avoid a flash of unstyled overlays before the JS bundle (and style.css) arrive */
-    html, body { margin: 0; height: 100%; background: #1d1747; color: #fff; overflow: hidden; }
+    html { height: 100%; height: -webkit-fill-available; height: 100dvh; }
+    html, body { margin: 0; background: #1d1747; color: #fff; overflow: hidden; overscroll-behavior: none; -webkit-tap-highlight-color: transparent; -webkit-text-size-adjust: 100%; }
+    body { position: fixed; inset: 0; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
     .screen:not(.is-active) { visibility: hidden; opacity: 0; }
     #settingsDialog:not([open]) { display: none; }
   </style>
@@ -46,6 +50,12 @@
       <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3.2-3.2a4.5 4.5 0 0 0-6.4-6.4L12 5.6M14 10a4.5 4.5 0 0 0-6.4 0l-3.2 3.2a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
       <symbol id="i-share" viewBox="0 0 24 24"><circle cx="18" cy="5.5" r="3" fill="currentColor"/><circle cx="6" cy="12" r="3" fill="currentColor"/><circle cx="18" cy="18.5" r="3" fill="currentColor"/><path d="M8.6 10.6l6.8-3.8M8.6 13.4l6.8 3.8" stroke="currentColor" stroke-width="2"/></symbol>
       <symbol id="i-camera" viewBox="0 0 24 24"><path fill="currentColor" d="M8.5 4h7l1.6 2.5H20a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8.5a2 2 0 0 1 2-2h2.9z"/><circle cx="12" cy="13" r="4.2" fill="#1d1747"/><circle cx="12" cy="13" r="2.6" fill="currentColor"/></symbol>
+      <symbol id="i-clear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="2.4"/><g stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.5 1.5M17.2 17.2l1.5 1.5M5.3 18.7l1.5-1.5M17.2 6.8l1.5-1.5"/></g></symbol>
+      <symbol id="i-rain" viewBox="0 0 24 24"><path fill="currentColor" d="M7 15.5a4.5 4.5 0 0 1-.6-8.96A5.6 5.6 0 0 1 17.2 7.6 3.95 3.95 0 0 1 17 15.5z"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 18l-1 2.6M12.2 18l-1 2.6M16.4 18l-1 2.6"/></g></symbol>
+      <symbol id="i-fullscreen" viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-fullscreen-exit" viewBox="0 0 24 24"><path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-ios-share" viewBox="0 0 24 24"><path d="M12 3v11M8 6.5L12 2.6l4 3.9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.5 9.5H6.8A1.8 1.8 0 0 0 5 11.3v8a1.8 1.8 0 0 0 1.8 1.8h10.4a1.8 1.8 0 0 0 1.8-1.8v-8a1.8 1.8 0 0 0-1.8-1.8h-1.7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+      <symbol id="i-add-square" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
       <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4.5" y="10.5" width="15" height="11" rx="2.5" fill="currentColor"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="2.4"/></symbol>
     </defs>
   </svg>
@@ -78,6 +88,7 @@
         <header class="topbar">
           <div class="points-pill" aria-label="Points"><span class="coin" aria-hidden="true">₹</span><b class="js-points">0</b><small>pts</small></div>
           <div class="topbar-actions">
+            <button type="button" class="icon-btn js-fullscreen" id="btnFullscreenMenu" aria-label="Enter full screen" hidden><svg><use href="#i-fullscreen"/></svg></button>
             <button type="button" class="icon-btn" id="btnMute" aria-label="Mute sound" aria-pressed="false"><svg><use href="#i-sound"/></svg></button>
             <button type="button" class="icon-btn" id="btnSettings" aria-label="Settings"><svg><use href="#i-gear"/></svg></button>
           </div>
@@ -110,9 +121,12 @@
         <div class="tracks-body">
           <div class="track-list" id="trackList" role="radiogroup" aria-label="Tracks"></div>
           <div class="panel race-setup">
-            <div class="setting"><span class="setting-label">LAPS</span><div class="seg" id="segLaps" role="radiogroup" aria-label="Laps"></div></div>
-            <div class="setting"><span class="setting-label">RIVALS</span><div class="seg" id="segRivals" role="radiogroup" aria-label="Rival difficulty"></div></div>
-            <div class="setting"><span class="setting-label">TIME</span><div class="seg seg-icons" id="segTime" role="radiogroup" aria-label="Time of day"></div></div>
+            <div class="setup-grid">
+              <div class="setting s-2"><span class="setting-label">LAPS</span><div class="seg" id="segLaps" role="radiogroup" aria-label="Laps"></div></div>
+              <div class="setting s-3"><span class="setting-label">RIVALS</span><div class="seg" id="segRivals" role="radiogroup" aria-label="Rival difficulty"></div></div>
+              <div class="setting s-3"><span class="setting-label">TIME</span><div class="seg seg-icons" id="segTime" role="radiogroup" aria-label="Time of day"></div></div>
+              <div class="setting s-2"><span class="setting-label">WEATHER</span><div class="seg seg-icons" id="segWeather" role="radiogroup" aria-label="Weather"></div></div>
+            </div>
             <button type="button" class="btn btn-primary btn-xl btn-chalo" id="btnStart">CHALO!<small>start race</small></button>
           </div>
         </div>
@@ -223,8 +237,11 @@
           <div class="panel lobby-settings">
             <h3 class="panel-title">RACE SETTINGS <span class="count" id="lobbyHostNote"></span></h3>
             <div class="setting setting-stack"><span class="setting-label">TRACK</span><div class="seg seg-wrap" id="segHostTrack" role="radiogroup" aria-label="Track"></div></div>
-            <div class="setting"><span class="setting-label">LAPS</span><div class="seg" id="segHostLaps" role="radiogroup" aria-label="Laps"></div></div>
-            <div class="setting"><span class="setting-label">TIME</span><div class="seg seg-icons" id="segHostTime" role="radiogroup" aria-label="Time of day"></div></div>
+            <div class="setup-grid">
+              <div class="setting s-2"><span class="setting-label">LAPS</span><div class="seg" id="segHostLaps" role="radiogroup" aria-label="Laps"></div></div>
+              <div class="setting s-3"><span class="setting-label">WEATHER</span><div class="seg seg-icons" id="segHostWeather" role="radiogroup" aria-label="Weather"></div></div>
+              <div class="setting s-5"><span class="setting-label">TIME</span><div class="seg seg-icons" id="segHostTime" role="radiogroup" aria-label="Time of day"></div></div>
+            </div>
             <button type="button" class="btn btn-primary btn-xl" id="btnHostStart">START RACE</button>
             <p class="waiting" id="lobbyWaiting"><span class="dots"><i></i><i></i><i></i></span>Waiting for the host to start</p>
           </div>
@@ -240,10 +257,14 @@
           </div>
           <div class="hud-time" id="hudTime">0:00.00</div>
           <div class="hud-sub"><span>BEST <b id="hudBest">--:--.--</b></span></div>
+          <div class="hud-cp" id="hudCp" hidden><span class="hud-cp-n" id="hudCpN">1/5</span><span class="hud-cp-name">NEXT <b id="hudCpName">Shangri La</b></span></div>
           <div class="hud-drift" id="hudDrift"><div class="drift-label">DRIFT <b id="hudDriftVal">0 m</b></div><div class="drift-bar"><i id="hudDriftFill"></i></div></div>
         </div>
         <div class="hud-tr">
-          <button type="button" class="icon-btn hud-pause" id="btnPause" aria-label="Pause"><svg><use href="#i-pause"/></svg></button>
+          <div class="hud-btns">
+            <button type="button" class="icon-btn hud-pause" id="btnPause" aria-label="Pause"><svg><use href="#i-pause"/></svg></button>
+            <button type="button" class="icon-btn hud-pause hud-fs js-fullscreen" id="btnFullscreen" aria-label="Enter full screen" hidden><svg><use href="#i-fullscreen"/></svg></button>
+          </div>
           <canvas class="minimap" id="minimap" aria-label="Track map"></canvas>
           <div class="hud-popups" id="hudPopups" aria-live="polite"></div>
         </div>
@@ -254,6 +275,7 @@
         <div class="hud-wrongway" id="hudWrongWay" hidden>WRONG WAY!</div>
         <div class="speed-tag" id="speedTag" aria-hidden="true"><div class="speed-tag-in"><b id="speedTagNum">0</b><small>km/h</small></div></div>
         <div class="hud-nitro" id="hudNitroWrap" aria-label="Nitro"><span class="hud-nitro-label">N<sub>2</sub>O</span><div class="nitro-bar"><i id="hudNitro"></i></div><kbd>SPACE</kbd></div>
+        <div class="hud-drift-key" id="hudDriftKey" aria-label="Drift: hold Shift"><span>DRIFT</span><kbd>SHIFT</kbd></div>
         <div class="fps" id="fps" hidden>60 FPS</div>
       </section>
 
@@ -274,6 +296,10 @@
       <!-- RESULTS -->
       <section class="screen screen-results screen-dim" id="screen-results" data-screen="results" aria-label="Results">
         <div class="results-wrap">
+          <div class="win-title" id="winTitle" hidden aria-live="polite">
+            <div class="win-title-main" id="winTitleMain"></div>
+            <div class="win-title-sub" id="winTitleSub"></div>
+          </div>
           <div class="results-head">
             <div class="results-place" id="resultsPlace">1<sup>st</sup></div>
             <div>
@@ -306,6 +332,18 @@
   <div class="countdown" id="countdown" aria-live="assertive" hidden><span id="countdownNum">3</span></div>
   <div class="banners" id="banners" aria-live="polite"></div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <!-- iOS Safari: one-time "Add to Home Screen" hint (iPhone Safari has no Fullscreen API) -->
+  <aside class="a2hs" id="a2hs" role="dialog" aria-labelledby="a2hsTitle" aria-describedby="a2hsText" hidden>
+    <img class="a2hs-icon" src="/apple-touch-icon.png" alt="" width="52" height="52" draggable="false">
+    <div class="a2hs-body">
+      <b class="a2hs-title" id="a2hsTitle">Race full screen</b>
+      <p class="a2hs-text" id="a2hsText">Tap <span class="a2hs-key"><svg aria-hidden="true"><use href="#i-ios-share"/></svg>Share</span> then <span class="a2hs-key"><svg aria-hidden="true"><use href="#i-add-square"/></svg>Add to Home Screen</span>, and launch Lord Alto from there: no browser bars, edge to edge.</p>
+      <small class="a2hs-sub">No Share button? It is inside the <b>&middot;&middot;&middot;</b> menu.</small>
+      <button type="button" class="a2hs-ok" id="a2hsOk">GOT IT</button>
+    </div>
+    <button type="button" class="a2hs-close" id="a2hsClose" aria-label="Dismiss"><svg><use href="#i-close"/></svg></button>
+  </aside>
 
   <!-- SETTINGS -->
   <dialog id="settingsDialog" class="modal" aria-labelledby="settingsTitle">

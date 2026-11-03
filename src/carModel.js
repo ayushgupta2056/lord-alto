@@ -62,6 +62,25 @@ function makeSpec(car) {
       plan: { kzF: 0.5, kxF: 0.05, kzR: 0.4, kxR: 0.04 },
       bFrac: 0.45, qFrac: 0, cLine: [0.12, 0.34], rearGlassW: 0.42, winMargin: 0.035,
     };
+  } else if (gen === 'omni') {
+    // Maruti Omni (Suzuki Carry ST90 van): cab-over box, wheels at the corners, 1840 mm wheelbase,
+    // near-vertical front with a short slope up to a big flat windscreen, near-vertical hatch.
+    const zFA = zF - 0.66, zRA = zFA - 1.84;
+    s = {
+      zFA, zRA, ra: 0.3, bt: 0.045, bs: 0.045, roofScale: 0.94, crown: 0.012, tuck: 0.015, belt: [1.0, 1.02],
+      pts: {
+        rb: [zR + 0.04, 0.22, 0.05], fb: [zF - 0.04, 0.22, 0.05], fbumper: [zF, 0.4, 0.04],
+        nose: [zF - 0.022, 0.86, 0.06], bonnet: [zF - 0.075, 0.96, 0.05], wsBase: [zF - 0.1, 0.985, 0.03],
+        wsTop: [zF - 0.47, H - 0.01, 0.1], roofRear: [zR + 0.07, H - 0.015, 0.08], hatchBot: [zR + 0.018, 1.0, 0.04],
+        rbumper: [zR, 0.42, 0.04],
+      },
+      plan: { kzF: 0.2, kxF: 0.025, kzR: 0.12, kxR: 0.02 },
+      bFrac: 0, qFrac: 0, cLine: null, rearGlassW: 0.52, winMargin: 0.035,
+      over: { archY: 0.265, sill: 0.2, tuckTop: 0.4, wheelR: 0.265, track: 0.59 },
+    };
+    const zWs = s.pts.wsBase[0], zHb = s.pts.hatchBot[0];
+    s.bFrac = (zWs - (zF - 1.0)) / (zWs - zHb); // B-pillar: rear edge of the hinged front door
+    s.qFrac = (zWs - (zF - 1.93)) / (zWs - zHb); // sliding door rear edge / quarter pillar
   } else { // gen3
     const fo = 0.66 + (L - 3.53) * 0.5, zFA = zF - fo, zRA = zFA - 2.38;
     s = {
@@ -75,7 +94,7 @@ function makeSpec(car) {
       bFrac: 0.45, qFrac: 0, cLine: [0.1, 0.22], rearGlassW: 0.44, winMargin: 0.035,
     };
   }
-  Object.assign(s, { gen, L, W, H, zF, zR, facelift: !!sh.facelift, legend: !!sh.legend, archY: 0.3, sill: 0.2, tuckTop: 0.42 });
+  Object.assign(s, { gen, L, W, H, zF, zR, facelift: !!sh.facelift, legend: !!sh.legend, archY: 0.3, sill: 0.2, tuckTop: 0.42, wheelR: WHEEL_R, track: 0.63 }, s.over);
   s.plan.zf0 = s.zFA + s.ra + 0.03;
   s.plan.zr0 = s.zRA - s.ra - 0.03;
   return s;
@@ -447,7 +466,7 @@ function buildParts(car) {
   add('paint', buildShell(F));
 
   const zFA = sp.zFA, zRA = sp.zRA, ra = sp.ra, H = sp.H;
-  const gen = sp.gen, g1 = gen === 'gen1', g1f = gen === 'gen1f', g2 = gen === 'gen2', g3 = gen === 'gen3';
+  const gen = sp.gen, g1 = gen === 'gen1', g1f = gen === 'gen1f', g2 = gen === 'gen2', g3 = gen === 'gen3', om = gen === 'omni';
   const zWs = P.wsBase[0], zHb = P.hatchBot[0];
   const zB = lerp(zWs, zHb, sp.bFrac);
   const zQ = sp.qFrac ? lerp(zWs, zHb, sp.qFrac) : null;
@@ -496,7 +515,11 @@ function buildParts(car) {
   const m = sp.winMargin;
   let frame = winPoly(m - 0.025, 0.004);
   if (cLine) frame = clip(frame, (p) => p[0] - (cLine(p[1]) - 0.025));
-  sidePoly('trim', frame, 0.0025, 0.15);
+  if (om) { // Omni: body-colour B and C pillars, so the black frame is split per window
+    sidePoly('trim', clip(frame, (p) => p[0] - (zB + 0.033)), 0.0025, 0.15);
+    sidePoly('trim', clip(clip(frame, (p) => (zB - 0.033) - p[0]), (p) => p[0] - (zQ + 0.023)), 0.0025, 0.15);
+    sidePoly('trim', clip(frame, (p) => (zQ - 0.023) - p[0]), 0.0025, 0.15);
+  } else sidePoly('trim', frame, 0.0025, 0.15);
   let glassAll = winPoly(m, 0.025);
   if (cLine) glassAll = clip(glassAll, (p) => p[0] - cLine(p[1]));
   const bw = 0.045;
@@ -508,14 +531,34 @@ function buildParts(car) {
   } else sidePoly('glass', rear, 0.006, 0.15);
 
   // ---- door shut lines & handles
-  const zDf = Math.min(zWs - 0.08, zFA - ra - 0.03);
+  const zDf = om ? sp.zF - 0.13 : Math.min(zWs - 0.08, zFA - ra - 0.03);
   const zDr = zQ !== null ? zQ : Math.max(zRA + ra + 0.05, cLine ? cLine(F.beltAt(zRA)) - 0.02 : zRA + ra + 0.05);
   const yLow = sp.sill + bs + 0.03;
-  for (const z of [zDf, zB, zDr]) {
+  const railY = 0.86;
+  if (om) {
+    // hinged front doors (the front wheel arch is cut into their lower edge), sliding doors behind them
+    // on both sides (as on the Indian Omni), running on an exposed rail along the rear quarter.
+    for (const z of [zDf, zB, zDr]) {
+      const top = F.beltAt(z) - 0.005;
+      side('trim', { z0: z - 0.004, z1: z + 0.004, y0: z === zDf ? 0.47 : yLow, y1: top, nu: 1, nv: 6, off: 0.0015 });
+    }
+    // sliding-door rail channel (rear quarter) + thin rubbing strip along the doors at the same height
+    side('trim', { z0: sp.zR + 0.08, z1: zDr - 0.012, y0: railY - 0.022, y1: railY + 0.022, nu: 6, nv: 1, off: 0.002, thick: 0.016 });
+    side('chrome', { z0: sp.zR + 0.09, z1: zDr - 0.02, y0: railY - 0.004, y1: railY + 0.004, nu: 6, nv: 1, off: 0.0185 });
+    side('trim', { z0: zDr + 0.012, z1: sp.zF - 0.1, y0: railY - 0.009, y1: railY + 0.009, nu: 8, nv: 1, off: 0.002, thick: 0.007 });
+    // front door handle (horizontal, near the rear edge) and sliding door grab handle (vertical, front edge)
+    side('trim', { z0: zB + 0.05, z1: zB + 0.19, y0: 0.905, y1: 0.94, round: 0.4, nu: 6, nv: 2, off: 0.002, thick: 0.008 });
+    side('trim', { z0: zB - 0.085, z1: zB - 0.055, y0: 0.89, y1: 0.985, round: 0.4, nu: 2, nv: 6, off: 0.002, thick: 0.01 });
+    // roof gutter rails along both roof edges
+    side('paint', { z0: P.wsTop[0] - 0.05, z1: P.roofRear[0] + 0.03, y0: H - 0.072, y1: H - 0.054, nu: 10, nv: 1, off: 0.002, thick: 0.016 });
+    // small side marker repeater on the front corner
+    side('amber', { z0: sp.zF - 0.22, z1: sp.zF - 0.16, y0: 0.66, y1: 0.69, round: 1, nu: 6, nv: 2, off: 0.002, thick: 0.004 });
+  } else for (const z of [zDf, zB, zDr]) {
     const top = F.beltAt(z) - 0.005;
     side('trim', { z0: z - 0.004, z1: z + 0.004, y0: z === zDr ? Math.max(yLow, sp.archY + ra + 0.03) : yLow, y1: top, nu: 1, nv: 6, off: 0.0015 });
   }
-  if (zDr > zRA + ra + 0.03) side('trim', { z0: zRA + ra + 0.02, z1: zDr, y0: sp.archY + ra + 0.02, y1: sp.archY + ra + 0.028, nu: 3, nv: 1, off: 0.0015 });
+  if (!om && zDr > zRA + ra + 0.03) side('trim', { z0: zRA + ra + 0.02, z1: zDr, y0: sp.archY + ra + 0.02, y1: sp.archY + ra + 0.028, nu: 3, nv: 1, off: 0.0015 });
+  if (!om) {
   const handle = (z) => {
     const y = F.beltAt(z) - 0.1;
     if (g1 || g1f) side('trim', { z0: z - 0.07, z1: z + 0.07, y0: y - 0.018, y1: y + 0.018, round: 0.4, nu: 6, nv: 2, off: 0.002, thick: 0.008 });
@@ -533,12 +576,13 @@ function buildParts(car) {
     side('trim', { z0: zRA + ra + 0.01, z1: zFA - ra - 0.01, y0: sp.sill + 0.01, y1: sp.sill + 0.13, nu: 12, nv: 2, off: 0.004, thick: 0.014 });
     add('trim', archFlares(F));
   }
+  } // !om
 
   // ---- mirrors
   for (const sg of [1, -1]) {
-    const zM = zWs - 0.13, yM = F.beltAt(zM) + 0.07;
+    const zM = om ? zWs - 0.16 : zWs - 0.13, yM = F.beltAt(zM) + 0.07;
     const a = F.side(zM, yM, sg, 0);
-    add(g1 ? 'trim' : 'paint', box(0.16, 0.1, 0.075, a.x + sg * 0.12, a.y + 0.03, a.z - 0.01, 0, sg * 0.12, 0, 0.03));
+    add(g1 || om ? 'trim' : 'paint', box(0.16, 0.1, 0.075, a.x + sg * 0.12, a.y + 0.03, a.z - 0.01, 0, sg * 0.12, 0, 0.03));
     add('trim', box(0.1, 0.035, 0.05, a.x + sg * 0.04, a.y, a.z, 0, 0, 0));
     add('chrome', box(0.13, 0.075, 0.006, a.x + sg * 0.125, a.y + 0.03, a.z - 0.05, 0, sg * 0.12, 0));
   }
@@ -552,7 +596,7 @@ function buildParts(car) {
     add('trim', g);
   }
   // antenna
-  if (!g3) {
+  if (!g3 && !om) {
     const p = F.surf(F.roofS(P.wsTop[0] - 0.12), -0.42, 0);
     add('trim', place(new THREE.CylinderGeometry(0.004, 0.007, 0.32, 5), p.x, p.y + 0.14, p.z - 0.07, -0.5, 0, 0));
   }
@@ -572,7 +616,21 @@ function buildParts(car) {
   const shutF = (y) => wall('trim', { s0: fy(y - 0.004), s1: fy(y + 0.004), w0: -(WE + 0.02), w1: WE + 0.02, nu: 24, nv: 1, off: 0.0015 });
   const shutR = (y) => wall('trim', { s0: ry(y + 0.004), s1: ry(y - 0.004), w0: -(WE + 0.02), w1: WE + 0.02, nu: 24, nv: 1, off: 0.0015 });
 
-  if (g1 || g1f) {
+  if (om) {
+    // black wrap-around bumper with a chrome top strip and amber indicators wrapping the corners
+    wall('trim', { s0: fy(0.25), s1: fy(0.47), w0: -(WE + 0.17), w1: WE + 0.17, nu: 20, nv: 3, off: 0, thick: 0.04, capN: [1, 0] });
+    wall('chrome', { s0: fy(0.452), s1: fy(0.462), w0: -(WE + 0.12), w1: WE + 0.12, nu: 16, nv: 1, off: 0.041, capN: [1, 0] });
+    wall('amber', { s0: fy(0.355), s1: fy(0.41), w0: 0.56, w1: WE + 0.09, nu: 8, nv: 2, off: 0.041, thick: 0.003, mirror: true, capN: [1, 0] });
+    plateFront(0.345, 0.041);
+    // rectangular headlamps in black surrounds at the lower corners, black grille strip between them
+    wall('trim', { s0: fy(0.575), s1: fy(0.785), w0: 0.365, w1: 0.675, round: 0.1, nu: 8, nv: 3, off: 0.002, thick: 0.014 });
+    wall('trim', { s0: fy(0.575), s1: fy(0.785), w0: -0.675, w1: -0.365, round: 0.1, nu: 8, nv: 3, off: 0.002, thick: 0.014 });
+    wall('lamp', { s0: fy(0.598), s1: fy(0.762), w0: 0.39, w1: 0.65, round: 0.15, nu: 8, nv: 3, off: 0.016, thick: 0.003, mirror: true });
+    wall('chrome', { s0: fy(0.672), s1: fy(0.688), w0: 0.41, w1: 0.63, nu: 4, nv: 1, off: 0.0195, mirror: true });
+    wall('trim', { s0: fy(0.6), s1: fy(0.735), w0: -0.36, w1: 0.36, nu: 8, nv: 2, off: 0.002, thick: 0.008 });
+    for (const y of [0.635, 0.67, 0.705]) wall('chrome', { s0: fy(y - 0.005), s1: fy(y + 0.005), w0: -0.335, w1: 0.335, nu: 6, nv: 1, off: 0.011 });
+    badgeF(0.84);
+  } else if (g1 || g1f) {
     const lr = g1 ? 0.12 : 0.4;
     if (g1) {
       wall('trim', { s0: fy(0.265), s1: fy(0.48), w0: -(WE + 0.2), w1: WE + 0.2, nu: 26, nv: 3, off: 0, thick: 0.028, capN: [1, 0] });
@@ -620,7 +678,24 @@ function buildParts(car) {
   }
 
   // ---- rear end
-  if (g1 || g1f) {
+  if (om) {
+    // top-hinged hatch between vertical corner tail-lamp clusters, black bumper, garnish + plate on the hatch
+    const hw = 0.575;
+    wall('trim', { s0: ry(0.47), s1: ry(0.25), w0: -(WE + 0.15), w1: WE + 0.15, nu: 20, nv: 3, off: 0, thick: 0.04, capN: [-1, 0] });
+    wall('chrome', { s0: ry(0.462), s1: ry(0.452), w0: -(WE + 0.1), w1: WE + 0.1, nu: 16, nv: 1, off: 0.041, capN: [-1, 0] });
+    wall('trim', { s0: ry(H - 0.055), s1: ry(0.475), w0: hw - 0.004, w1: hw + 0.004, nu: 1, nv: 5, off: 0.0015 });
+    wall('trim', { s0: ry(H - 0.055), s1: ry(0.475), w0: -hw - 0.004, w1: -hw + 0.004, nu: 1, nv: 5, off: 0.0015 });
+    wall('trim', { s0: ry(H - 0.05), s1: ry(H - 0.058), w0: -hw, w1: hw, nu: 12, nv: 1, off: 0.0015 });
+    wall('trim', { s0: ry(0.87), s1: ry(0.475), w0: hw + 0.012, w1: WE + 0.065, round: 0.1, nu: 6, nv: 5, off: 0.002, thick: 0.004, mirror: true, capN: [-1, 0] });
+    wall('tail', { s0: ry(0.855), s1: ry(0.62), w0: hw + 0.025, w1: WE + 0.055, round: 0.12, nu: 6, nv: 4, off: 0.006, thick: 0.006, mirror: true, capN: [-1, 0] });
+    wall('amber', { s0: ry(0.61), s1: ry(0.545), w0: hw + 0.025, w1: WE + 0.055, nu: 6, nv: 2, off: 0.006, thick: 0.006, mirror: true, capN: [-1, 0] });
+    wall('lamp', { s0: ry(0.537), s1: ry(0.49), w0: hw + 0.025, w1: WE + 0.055, nu: 6, nv: 1, off: 0.006, thick: 0.006, mirror: true, capN: [-1, 0] });
+    wall('trim', { s0: ry(0.83), s1: ry(0.76), w0: -0.44, w1: 0.44, round: 0.2, nu: 10, nv: 2, off: 0.002, thick: 0.008 });
+    wall('chrome', { s0: ry(0.808), s1: ry(0.782), w0: -0.05, w1: 0.05, round: 0.5, nu: 6, nv: 1, off: 0.011 });
+    wall('tail', { s0: ry(H - 0.085), s1: ry(H - 0.1), w0: -0.13, w1: 0.13, round: 0.6, nu: 6, nv: 1, off: 0.009 }); // high-mount stop lamp
+    plateRear(0.64, 0.003);
+    badgeR(0.92);
+  } else if (g1 || g1f) {
     if (g1) wall('trim', { s0: ry(0.5), s1: ry(0.27), w0: -(WE + 0.18), w1: WE + 0.18, nu: 26, nv: 3, off: 0, thick: 0.028, capN: [-1, 0] });
     else { shutR(0.52); wall('trim', { s0: ry(0.33), s1: ry(0.27), w0: -(WE + 0.1), w1: WE + 0.1, nu: 22, nv: 1, off: 0.002, thick: 0.008, capN: [-1, 0] }); }
     wall('tail', { s0: ry(0.9), s1: ry(0.68), w0: 0.48, w1: WE + 0.05, round: g1 ? 0.1 : 0.25, nu: 6, nv: 4, off: 0.005, thick: 0.008, mirror: true, capN: [-1, 0] });
@@ -650,9 +725,10 @@ function buildParts(car) {
   }
 
   // ---- underbody, arch liners, exhaust
-  add('trim', box(1.06, 0.44, zFA - zRA + 2 * ra - 0.1, 0, 0.38, (zFA + zRA) / 2));
-  add('trim', archLiners(F));
-  const ex = { x: -0.42, y: 0.205, z: sp.zR - 0.035 };
+  const tw = sp.track - 0.1;
+  add('trim', box(2 * tw, 0.44, zFA - zRA + 2 * ra - 0.1, 0, sp.archY + 0.08, (zFA + zRA) / 2));
+  add('trim', archLiners(F, tw));
+  const ex = om ? { x: -0.4, y: 0.19, z: sp.zR + 0.05 } : { x: -0.42, y: 0.205, z: sp.zR - 0.035 };
   add('chrome', place(new THREE.CylinderGeometry(0.03, 0.03, 0.22, 12, 1, true), ex.x, ex.y, ex.z + 0.11, PI / 2, 0, 0));
   add('trim', place(new THREE.CircleGeometry(0.029, 12), ex.x, ex.y, ex.z + 0.01, 0, PI, 0));
 
@@ -669,7 +745,9 @@ function buildParts(car) {
   const zRs = lerp(zB, zBack, 0.7);
   add('interior', box(1.12, 0.46, 0.11, 0, yb + 0.02, zRs, -0.15, 0, 0));
   for (const x of [-0.33, 0.33]) add('interior', box(0.24, 0.14, 0.09, x, yb + 0.31, zRs - 0.05, -0.15, 0, 0));
-  add('trim', place(new THREE.TorusGeometry(0.16, 0.02, 6, 18), -0.33, yb + 0.12, zDash - 0.4, -0.45, 0, 0));
+  if (om) add('interior', box(1.12, 0.46, 0.11, 0, yb + 0.02, lerp(zB, zBack, 0.3), -0.15, 0, 0)); // middle bench (8-seater)
+  if (om) add('trim', place(new THREE.TorusGeometry(0.17, 0.02, 6, 18), -0.33, yb + 0.1, zDash - 0.22, -1.05, 0, 0)); // bus-like flat wheel
+  else add('trim', place(new THREE.TorusGeometry(0.16, 0.02, 6, 18), -0.33, yb + 0.12, zDash - 0.4, -0.45, 0, 0));
 
   // ---- merge buckets
   const geos = {};
@@ -681,7 +759,9 @@ function buildParts(car) {
   const roofMid = F.surf(F.roofS((P.wsTop[0] + P.roofRear[0]) / 2), 0, 0);
   const info = {
     sp, F,
-    wheels: [[0.63, zFA], [-0.63, zFA], [0.63, zRA], [-0.63, zRA]],
+    wheels: [[sp.track, zFA], [-sp.track, zFA], [sp.track, zRA], [-sp.track, zRA]],
+    wheelR: sp.wheelR,
+    lipDz: om ? 0.02 : -0.05, // Omni: near-vertical hatch, keep the roof lip from overhanging too far
     exhaust: [ex.x, ex.y, ex.z - 0.02],
     roofTop, roofMid,
     roofHalf: (hd + bt) * sp.roofScale,
@@ -739,12 +819,12 @@ function buildShell(F) {
   return caps;
 }
 
-function archLiners(F) {
+function archLiners(F, tw = 0.53) {
   const sp = F.sp, out = [];
   const d = (sp.archY - sp.sill) / sp.ra, a0 = PI + Math.asin(d), a1 = -Math.asin(d), N = 12, r = sp.ra - 0.006;
   for (const zc of [sp.zFA, sp.zRA]) for (const sg of [1, -1]) {
     const pos = [], idx = [];
-    const xs = [sg * 0.52, sg * (F.hd + F.bt - 0.015)];
+    const xs = [sg * (tw - 0.01), sg * (F.hd + F.bt - 0.015)];
     for (let k = 0; k <= N; k++) {
       const a = lerp(a0, a1, k / N);
       for (const x of xs) { const v = F.deform(x, sp.archY + r * Math.sin(a), zc + r * Math.cos(a)); pos.push(v.x, v.y, v.z); }
@@ -957,13 +1037,18 @@ function stickerGeo(parts, type) {
   const { F, sp } = parts.info, { S, P } = F, list = [];
   if (type === 'stripes') {
     const mk = (s0, s1, sg) => list.push(...gridPanel((a, b, off) => F.surf(lerp(s0, s1, b), sg * lerp(0.07, 0.22, a), off), { nu: 2, nv: 14, off: 0.009 }));
+    const om = sp.gen === 'omni';
     for (const sg of [1, -1]) {
-      mk(F.fy(P.nose[1] - 0.02), S.wsBase - 0.035, sg);
-      mk(S.wsTop - 0.02, S.roofRear + 0.02, sg);
-    }
+      mk(F.fy(om ? 0.75 : P.nose[1] - 0.02), S.wsBase - 0.035, sg);
+      mk(S.wsTop - 0.02, S.roofRear + 0.02, sg);    }
   } else if (type === 'flames' || type === 'baroda') {
-    const z0 = sp.zRA + sp.ra + (type === 'flames' ? 0.06 : 0.14), z1 = sp.zFA - sp.ra - (type === 'flames' ? 0.04 : 0.1);
-    const [y0, y1] = type === 'flames' ? [0.37, F.beltAt(0) - 0.05] : [0.39, 0.39 + ((z1 - z0) * 170) / 1024];
+    const om = sp.gen === 'omni';
+    // Omni: on the big flat sides, below the sliding-door rail / rubbing strip, between the arches
+    const z0 = sp.zRA + sp.ra + (type === 'flames' ? (om ? 0.04 : 0.06) : om ? 0.1 : 0.14);
+    const z1 = sp.zFA - sp.ra - (type === 'flames' ? (om ? 0.02 : 0.04) : om ? 0.06 : 0.1);
+    const fy1 = om ? 0.83 : F.beltAt(0) - 0.05;
+    const by0 = om ? 0.5 : 0.39;
+    const [y0, y1] = type === 'flames' ? [om ? 0.33 : 0.37, fy1] : [by0, by0 + ((z1 - z0) * 170) / 1024];
     for (const sg of [1, -1]) {
       const uv = (a, b) => [type === 'flames' || sg > 0 ? 1 - a : a, b];
       list.push(...gridPanel((a, b, off) => F.side(lerp(z0, z1, a), lerp(y0, y1, b), sg, off), { nu: 10, nv: 3, off: 0.005, uv }));
@@ -1020,11 +1105,12 @@ export function buildCarModel(carId, mods) {
   }
 
   // wheels
-  const wheels = [], pivots = [];
+  const wheels = [], pivots = [], wr = info.wheelR;
   info.wheels.forEach(([x, z], i) => {
-    const pivot = new THREE.Object3D(); pivot.position.set(x, WHEEL_R, z);
+    const pivot = new THREE.Object3D(); pivot.position.set(x, wr, z);
     const wheel = new THREE.Object3D(); pivot.add(wheel);
     const holder = new THREE.Object3D(); if (x < 0) holder.rotation.y = PI; wheel.add(holder);
+    if (wr !== WHEEL_R) holder.scale.setScalar(wr / WHEEL_R); // e.g. the Omni's 12-inch wheels share the tyre/rim geometry
     const tyre = new THREE.Mesh(tyreGeo(), tyreMat()); tyre.castShadow = true;
     const rim = new THREE.Mesh(rimGeo(), rimMat(DEFAULT_MODS.rim));
     holder.add(tyre, rim); st.rimMeshes.push(rim);
@@ -1041,7 +1127,7 @@ export function buildCarModel(carId, mods) {
   glow.position.y = 0.03; glow.visible = false; glow.renderOrder = 0;
   group.add(glow); st.glow = glow;
 
-  group.userData = { wheels, wheelPivots: pivots, body, brakeMat, exhaust, radius: WHEEL_R, carId: car.id, _alto: st };
+  group.userData = { wheels, wheelPivots: pivots, body, brakeMat, exhaust, radius: wr, carId: car.id, _alto: st };
 
   if (sp.legend) {
     const halo = new THREE.Object3D(); halo.name = 'halo';
@@ -1075,7 +1161,7 @@ export function applyMods(group, mods) {
     const rt = info.roofTop;
     if (m.spoiler === 'lip') {
       const s = new THREE.Mesh(lipGeo(info.roofHalf * 2 - 0.05), pm);
-      s.position.set(0, rt.y - 0.012, rt.z - 0.05); s.castShadow = true;
+      s.position.set(0, rt.y - 0.012, rt.z + info.lipDz); s.castShadow = true;
       st.spoiler.push(s);
     } else if (m.spoiler === 'wing') {
       const w = new THREE.Mesh(wingGeo(), pm);

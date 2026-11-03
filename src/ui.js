@@ -21,6 +21,12 @@ const STICKER_NAMES = { stripes: 'Racing stripes', flames: 'Flames', jai_mataji:
 const SPOILER_NAMES = { none: 'NONE', lip: 'LIP', wing: 'WING' };
 const TIME_NAMES = { day: 'DAY', sunset: 'SUNSET', night: 'NIGHT' };
 const TIME_ICON = { day: 'i-sun', sunset: 'i-sunset', night: 'i-moon', auto: 'i-auto' };
+const WEATHERS = ['clear', 'rain'];
+const WEATHER_NAMES = { clear: 'CLEAR', rain: 'RAIN' };
+const WEATHER_ICON = { clear: 'i-clear', rain: 'i-rain' };
+const normWeather = (w) => (WEATHERS.includes(w) ? w : 'clear');
+const A2HS_KEY = 'lordalto.a2hs'; // 'dismissed' | number of sessions it was shown in
+const A2HS_MAX_SHOWS = 3;
 const STAT_NAMES = { speed: 'SPEED', accel: 'ACCEL', handling: 'HANDLING', nitro: 'NITRO' };
 const TIPS = [
   'Tip: hold DRIFT through Genda Circle to fill your nitro tank.',
@@ -134,7 +140,7 @@ export class UI {
     this.points = 0;
     this._shownPoints = 0;
     this.settings = { muted: false, touch: 'buttons', ...loadPrefs() };
-    this.trackSel = { track: TRACKS[0]?.id, laps: 3, difficulty: 'normal', timeOfDay: null };
+    this.trackSel = { track: TRACKS[0]?.id, laps: 3, difficulty: 'normal', timeOfDay: null, weather: 'clear' };
     this.tracks = TRACKS;
     this.garage = null;
     this.room = null;
@@ -150,6 +156,7 @@ export class UI {
 
     this._buildStatic();
     this._bind();
+    this._initPlatform();
     this._applySettings();
     const tip = $('loadTip');
     if (tip) tip.textContent = TIPS[Math.floor(Math.random() * TIPS.length)];
@@ -210,6 +217,7 @@ export class UI {
       this._hideIntro();
     }
     this.sections[name]?.scrollTo?.(0, 0);
+    this._onScreenPlatform(name);
     try { window.dispatchEvent(new CustomEvent('ui:screen', { detail: { screen: name, prev } })); } catch { /* old browsers */ }
   }
 
@@ -283,6 +291,7 @@ export class UI {
       const diff = settings.difficulty ?? settings.rivals;
       if (diff) this.trackSel.difficulty = diff;
       if ('timeOfDay' in settings) this.trackSel.timeOfDay = settings.timeOfDay || null;
+      if ('weather' in settings) this.trackSel.weather = normWeather(settings.weather);
     }
     if (!this.tracks.some((t) => t.id === this.trackSel.track)) this.trackSel.track = this.tracks[0]?.id;
     const key = this.tracks.map((t) => t.id).join('|');
@@ -298,6 +307,7 @@ export class UI {
     this._segSet('segLaps', String(this.trackSel.laps));
     this._segSet('segRivals', this.trackSel.difficulty);
     this._segSet('segTime', this.trackSel.timeOfDay || 'auto');
+    this._segSet('segWeather', this.trackSel.weather);
   }
 
   _trackCard(t, i) {
@@ -321,6 +331,7 @@ export class UI {
     }
     const badge = el('span', 'tod-badge');
     badge.append(icon(TIME_ICON[t.timeOfDay] || 'i-sun'), document.createTextNode(TIME_NAMES[t.timeOfDay] || 'DAY'));
+    if (t.weather === 'rain') { badge.append(icon(WEATHER_ICON.rain, 'tod-rain')); badge.classList.add('has-rain'); }
     art.appendChild(badge);
     const info = el('div', 'track-info');
     info.append(el('span', 'track-name', t.name), el('p', 'track-tagline', t.tagline || ''));
@@ -556,11 +567,12 @@ export class UI {
     $('lobbyCount').textContent = `${players.length}/${MAX_RACERS}`;
     // settings
     const s = room.settings || {};
-    this._lobbySettings = { track: s.track || TRACKS[0].id, laps: s.laps || 3, timeOfDay: s.timeOfDay ?? null };
+    this._lobbySettings = { track: s.track || TRACKS[0].id, laps: s.laps || 3, timeOfDay: s.timeOfDay ?? null, weather: normWeather(s.weather) };
     this._segSet('segHostTrack', this._lobbySettings.track);
     this._segSet('segHostLaps', String(this._lobbySettings.laps));
     this._segSet('segHostTime', this._lobbySettings.timeOfDay || 'auto');
-    for (const id of ['segHostTrack', 'segHostLaps', 'segHostTime']) $(id).querySelectorAll('button').forEach((b) => { b.disabled = !isHost; });
+    this._segSet('segHostWeather', this._lobbySettings.weather);
+    for (const id of ['segHostTrack', 'segHostLaps', 'segHostTime', 'segHostWeather']) $(id).querySelectorAll('button').forEach((b) => { b.disabled = !isHost; });
     $('lobbyHostNote').textContent = isHost ? 'you are the host' : 'host decides';
     const racing = room.phase === 'racing';
     $('btnHostStart').hidden = !isHost;
@@ -630,6 +642,7 @@ export class UI {
       $('hudNitroWrap').classList.toggle('full', n01 >= 0.99);
     });
     set('nitroOn', !!d.nitroOn, (v) => { $('hudNitroWrap').classList.toggle('on', v); });
+    set('driftOn', !!d.driftOn, (v) => { $('hudDriftKey')?.classList.toggle('on', v); });
     // drift: metres of the current drift (0 = not drifting); values <= 1 are treated as a 0..1 meter
     const dr = typeof d.drift === 'boolean' ? (d.drift ? 1 : 0) : +d.drift || 0;
     set('drift', Math.round(dr * 10), () => {
@@ -641,6 +654,15 @@ export class UI {
       $('hudDriftFill').style.transform = `scaleX(${Math.min(1, meters ? dr / 120 : dr).toFixed(3)})`;
     });
     set('wrongWay', !!d.wrongWay, (v) => { $('hudWrongWay').hidden = !v; });
+    // Ordered checkpoints (School Se Ghar Tak): progress + next stop
+    const cp = d.checkpoint;
+    set('cp', cp ? cp.n + '|' + cp.name : '', () => {
+      $('hudCp').hidden = !cp;
+      if (!cp) return;
+      $('hudCpN').textContent = cp.n + '/' + cp.total;
+      $('hudCpName').textContent = cp.name;
+      const box = $('hudCp'); box.classList.remove('pop'); void box.offsetWidth; box.classList.add('pop');
+    });
   }
 
   minimap(points, bounds, cars) {
@@ -881,8 +903,18 @@ export class UI {
   // ======================================================================
   // Results
   // ======================================================================
-  results(rows, totalPoints, breakdown) {
+  // win = { title, name, car } for the meme victory title (Lord Alto / Omni E winners), or null
+  results(rows, totalPoints, breakdown, win) {
     rows = [...(rows || [])].sort((a, b) => (a.place || 99) - (b.place || 99));
+    const wt = $('winTitle');
+    if (wt) {
+      wt.hidden = !win;
+      if (win) {
+        $('winTitleMain').textContent = win.title;
+        $('winTitleSub').textContent = `${win.name} won in the ${win.car}`;
+        wt.classList.remove('show'); void wt.offsetWidth; wt.classList.add('show');
+      }
+    }
     const me = rows.find((r) => r.me);
     const place = me?.place || 0;
     const pl = $('resultsPlace');
@@ -946,6 +978,7 @@ export class UI {
     if (s.laps != null) this.trackSel.laps = +s.laps;
     if (s.difficulty) this.trackSel.difficulty = s.difficulty;
     if ('timeOfDay' in s) this.trackSel.timeOfDay = s.timeOfDay || null;
+    if ('weather' in s) { this.trackSel.weather = normWeather(s.weather); this._segSet('segWeather', this.trackSel.weather); }
     this._applySettings();
   }
 
@@ -1003,6 +1036,120 @@ export class UI {
   }
 
   // ======================================================================
+  // Platform: fullscreen (Android / desktop), Add to Home Screen hint (iOS)
+  // ======================================================================
+  _initPlatform() {
+    const ua = navigator.userAgent || '';
+    const iOS = /iP(hone|od|ad)/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1); // iPadOS reports as a Mac
+    const standalone = navigator.standalone === true
+      || (typeof matchMedia === 'function' && matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches);
+    const fsEnabled = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+    this._plat = { iOS, standalone, fs: fsEnabled && !iOS && !standalone };
+    document.documentElement.classList.toggle('is-ios', iOS);
+    document.documentElement.classList.toggle('is-standalone', standalone);
+
+    // iOS Safari only applies :active styles when a touch listener exists
+    document.addEventListener('touchstart', () => {}, { passive: true });
+
+    const fsBtns = [...document.querySelectorAll('.js-fullscreen')];
+    fsBtns.forEach((b) => {
+      b.hidden = !this._plat.fs;
+      b.addEventListener('click', () => this.toggleFullscreen());
+    });
+    const sync = () => {
+      const on = !!fsElement();
+      document.documentElement.classList.toggle('is-fullscreen', on);
+      for (const b of fsBtns) {
+        b.querySelector('use')?.setAttribute('href', on ? '#i-fullscreen-exit' : '#i-fullscreen');
+        b.setAttribute('aria-label', on ? 'Exit full screen' : 'Enter full screen');
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      }
+      this._orientationLock();
+    };
+    document.addEventListener('fullscreenchange', sync);
+    document.addEventListener('webkitfullscreenchange', sync);
+    sync();
+
+    const a = $('a2hs');
+    if (a) {
+      const dismiss = () => { this._hideA2hs(); try { localStorage.setItem(A2HS_KEY, 'dismissed'); } catch { /* private mode */ } };
+      $('a2hsClose')?.addEventListener('click', dismiss);
+      $('a2hsOk')?.addEventListener('click', dismiss);
+    }
+  }
+
+  /** Android / desktop: enter or leave real fullscreen (must run inside a user gesture). */
+  async toggleFullscreen(force) {
+    if (!this._plat?.fs) return false;
+    const on = !!fsElement();
+    const want = force == null ? !on : !!force;
+    if (want === on) return on;
+    try {
+      if (want) {
+        const root = document.documentElement;
+        if (root.requestFullscreen) await root.requestFullscreen({ navigationUI: 'hide' });
+        else if (root.webkitRequestFullscreen) root.webkitRequestFullscreen();
+      } else if (document.exitFullscreen) await document.exitFullscreen();
+      else document.webkitExitFullscreen?.();
+    } catch (e) {
+      console.warn('[ui] fullscreen refused', e);
+    }
+    return !!fsElement();
+  }
+
+  /** While racing in fullscreen, keep the current orientation so tilting the phone never rotates the view. */
+  _orientationLock() {
+    const so = screen.orientation;
+    if (!so || typeof so.lock !== 'function') return;
+    const racing = this.screen === 'race' || this.screen === 'pause';
+    if (fsElement() && racing) {
+      if (this._oLocked) return;
+      this._oLocked = true;
+      const type = String(so.type || '').startsWith('portrait') ? 'portrait' : 'landscape';
+      so.lock(type).catch(() => { this._oLocked = false; });
+    } else if (this._oLocked) {
+      this._oLocked = false;
+      try { so.unlock(); } catch { /* not locked */ }
+    }
+  }
+
+  _onScreenPlatform(name) {
+    this._orientationLock();
+    if (name === 'menu') this._maybeA2hs();
+    else this._hideA2hs();
+  }
+
+  _maybeA2hs() {
+    const p = this._plat;
+    if (!p || !p.iOS || p.standalone || this._a2hsDone) return;
+    let st = null;
+    try { st = localStorage.getItem(A2HS_KEY); } catch { /* private mode */ }
+    if (st === 'dismissed' || (+st || 0) >= A2HS_MAX_SHOWS) { this._a2hsDone = true; return; }
+    clearTimeout(this._timers.a2hs);
+    this._timers.a2hs = setTimeout(() => {
+      if (this.screen !== 'menu' || $('settingsDialog')?.open) return;
+      const a = $('a2hs');
+      if (!a) return;
+      this._a2hsDone = true; // at most once per session
+      try { localStorage.setItem(A2HS_KEY, String((+st || 0) + 1)); } catch { /* private mode */ }
+      a.hidden = false;
+      a.classList.remove('out');
+      void a.offsetWidth;
+      a.classList.add('in');
+    }, 1400);
+  }
+
+  _hideA2hs() {
+    clearTimeout(this._timers.a2hs);
+    const a = $('a2hs');
+    if (!a || a.hidden) return;
+    a.classList.remove('in');
+    a.classList.add('out');
+    clearTimeout(this._timers.a2hsOut);
+    this._timers.a2hsOut = setTimeout(() => { a.hidden = true; a.classList.remove('out'); }, 280);
+  }
+
+  // ======================================================================
   // Construction + wiring
   // ======================================================================
   _buildStatic() {
@@ -1014,6 +1161,9 @@ export class UI {
     this._seg('segLaps', lapOpts, (v) => { this.trackSel.laps = +v; });
     this._seg('segRivals', diffOpts, (v) => { this.trackSel.difficulty = v; });
     this._seg('segTime', timeOpts, (v) => { this.trackSel.timeOfDay = v === 'auto' ? null : v; }, true);
+    const weatherOpts = WEATHERS.map((w) => [w, WEATHER_NAMES[w], WEATHER_ICON[w]]);
+    this._seg('segWeather', weatherOpts, (v) => { this.trackSel.weather = v; }, true);
+    this._seg('segHostWeather', weatherOpts, (v) => this._hostSetting('weather', v), true);
     this._seg('segHostTrack', TRACKS.map((t) => [t.id, (t.short || t.name).toUpperCase()]), (v) => this._hostSetting('track', v));
     this._seg('segHostLaps', lapOpts, (v) => this._hostSetting('laps', +v));
     this._seg('segHostTime', timeOpts, (v) => this._hostSetting('timeOfDay', v === 'auto' ? null : v), true);
@@ -1266,6 +1416,7 @@ export class UI {
 }
 
 // ---------- misc ----------
+function fsElement() { return document.fullscreenElement || document.webkitFullscreenElement || null; }
 function boundsOf(points) {
   let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
   for (const [x, z] of points) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z); }

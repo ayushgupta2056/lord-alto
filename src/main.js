@@ -14,6 +14,8 @@ import { UI } from './ui.js';
 import { Net, roomFromUrl } from './net.js';
 import { openSelfie, savedSelfie } from './selfie.js';
 import { SpeedLines } from './speedfx.js';
+import { Post } from './post.js';
+import { Weather } from './weather.js';
 
 const profile = new Profile();
 const settings = profile.d.settings;
@@ -25,7 +27,8 @@ const canvas = document.getElementById('game');
 // ---------- renderer ----------
 let renderer;
 function makeRenderer() {
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+  // Post does its own anti-aliasing (MSAA/FXAA), so the default framebuffer skips it (saves memory on iOS)
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -37,7 +40,9 @@ makeRenderer();
 
 const camera = new THREE.PerspectiveCamera(62, 1, 0.1, 2500);
 const world = new World(renderer);
-let fx = null;
+let fx = null, weather = null;
+// Cinematic post-processing: bloom, warm grade, vignette, nitro blur (falls back to plain rendering if unsupported)
+const post = new Post(renderer, { quality: QUALITY });
 
 // ---------- garage / menu showroom ----------
 const showroom = new THREE.Scene();
@@ -73,7 +78,7 @@ const input = new Input();
 const audio = new GameAudio();
 const net = new Net();
 let race = null, track = null, screen = 'loading', paused = false;
-let raceSettings = { track: TRACKS[0].id, laps: settings.laps || 3, difficulty: settings.difficulty || 'normal', timeOfDay: settings.timeOfDay || null };
+let raceSettings = { track: TRACKS[0].id, laps: settings.laps || 3, difficulty: settings.difficulty || 'normal', timeOfDay: settings.timeOfDay || null, weather: settings.weather || 'clear' };
 let mpRace = false, shake = 0, lastBannerAt = 0;
 const avatars = new Map(); // pid -> selfie data URL, for players in the current room
 net.setAvatar(savedSelfie());
@@ -151,7 +156,7 @@ function sanitizePlate(v) {
   const s = String(v || '').toUpperCase().replace(/[^A-Z0-9 ]/g, '').trim().slice(0, 13);
   return s.startsWith('GJ') ? s : ('GJ 06 ' + s).slice(0, 13);
 }
-function persistRaceSettings() { settings.laps = raceSettings.laps; settings.difficulty = raceSettings.difficulty; settings.timeOfDay = raceSettings.timeOfDay; profile.save(); }
+function persistRaceSettings() { settings.laps = raceSettings.laps; settings.difficulty = raceSettings.difficulty; settings.timeOfDay = raceSettings.timeOfDay; settings.weather = raceSettings.weather; profile.save(); }
 function wantTouch() { return settings.touch !== 'off' && (matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window); }
 
 function refreshGarage() {
@@ -172,11 +177,20 @@ function go(s) {
 }
 
 // ---------- races ----------
-function loadTrack(id, timeOfDay) {
+let currentWeather = 'clear', currentTime = 'day';
+function loadTrack(id, timeOfDay, weatherKind = 'clear') {
   const def = TRACKS.find(t => t.id === id) || TRACKS[0];
   track = buildTrack(def);
-  world.load(track, { timeOfDay: timeOfDay || def.timeOfDay, quality: QUALITY });
+  currentWeather = weatherKind === 'rain' ? 'rain' : 'clear';
+  currentTime = timeOfDay || def.timeOfDay;
+  world.load(track, { timeOfDay: currentTime, quality: QUALITY, weather: currentWeather });
   fx = new FX(world.scene, QUALITY); // world.load() clears the scene, so particles are rebuilt per track
+  fx.setTimeOfDay?.(currentTime);
+  weather?.dispose();
+  weather = new Weather(world.scene, QUALITY, { timeOfDay: currentTime });
+  weather.set(currentWeather);
+  post.setTimeOfDay(currentTime);
+  post.setWeather(currentWeather);
   return def;
 }
 
@@ -188,8 +202,8 @@ function playerOpts() {
 function startSingle() {
   endRace();
   mpRace = false;
-  const def = loadTrack(raceSettings.track, raceSettings.timeOfDay);
-  race = new Race({ scene: world.scene, track, fx, laps: raceSettings.laps, difficulty: DIFFICULTY[raceSettings.difficulty] || 0.95, player: playerOpts(), rivals: 7, shadows: true, onEvent: onRaceEvent });
+  const def = loadTrack(raceSettings.track, raceSettings.timeOfDay, raceSettings.weather);
+  race = new Race({ scene: world.scene, track, fx, laps: raceSettings.laps, difficulty: DIFFICULTY[raceSettings.difficulty] || 0.95, player: playerOpts(), rivals: 7, shadows: true, weather: currentWeather, onEvent: onRaceEvent });
   startCamera();
   go('race');
   ui.raceIntro?.('RACE · ' + def.name, def.tagline);
@@ -198,9 +212,9 @@ function startSingle() {
 function startMulti(p) {
   endRace();
   mpRace = true;
-  const def = loadTrack(p.track, p.timeOfDay);
+  const def = loadTrack(p.track, p.timeOfDay, p.weather);
   const room = net.room;
-  race = new Race({ scene: world.scene, track, fx, laps: p.laps, difficulty: 1, player: playerOpts(), net, grid: p.grid, players: room.players, startAt: p.startAt, avatars, shadows: true, onEvent: onRaceEvent });
+  race = new Race({ scene: world.scene, track, fx, laps: p.laps, difficulty: 1, player: playerOpts(), net, grid: p.grid, players: room.players, startAt: p.startAt, avatars, shadows: true, weather: currentWeather, onEvent: onRaceEvent });
   startCamera();
   go('race');
   ui.raceIntro?.('RACE · ' + def.name, def.tagline);
@@ -216,7 +230,13 @@ function endRace() {
 let lastCount = null;
 function onRaceEvent(type, d) {
   switch (type) {
-    case 'go': ui.countdown(0); ui.raceIntro?.(null); audio.countdown(true); setTimeout(() => ui.countdown(null), 900); break;
+    case 'go':
+      ui.countdown(0); ui.raceIntro?.(null); audio.countdown(true); setTimeout(() => ui.countdown(null), 900);
+      // Controls reminder (first few races of a session)
+      if ((controlsHints = (controlsHints || 0) + 1) <= 3) setTimeout(() => ui.toast(wantTouch()
+        ? 'Hold ⌃ to go · hold DRIFT while turning to slide · N₂O to boost'
+        : '↑ gas · ← → steer · hold SHIFT (or X) while turning to DRIFT · SPACE nitro'), 1100);
+      break;
     case 'nitro': audio.nitroStart(); break;
     case 'lap': ui.banner(d.lap === d.laps ? 'FINAL LAP!' : `LAP ${d.lap}/${d.laps}`, 'info'); audio.lapDing(); break;
     case 'wall': if (d.power > 0.25) { audio.crash(d.power * 0.6); shake = Math.max(shake, d.power * 0.3); } break;
@@ -246,11 +266,19 @@ function onRaceEvent(type, d) {
       break;
     case 'respawn': ui.toast('Back on the road'); break;
     case 'overtake': ui.popup?.(`+${d.points} ${d.count > 1 ? (d.count === 2 ? 'DOUBLE ' : 'TRIPLE ') : ''}OVERTAKE`, 'good'); break;
-    case 'driftbank': ui.popup?.(`+${d.meters} m DRIFT`, 'nitro'); break;
+    case 'driftbank': ui.popup?.(`+${d.points} DRIFT${d.combo >= 1.5 ? ' x' + d.combo.toFixed(1) : ''} · ${d.meters} m`, 'nitro'); break;
+    case 'checkpoint': ui.popup?.(`✓ ${d.name}  ${d.n}/${d.total}`, 'good'); audio.lapDing(); break;
   }
 }
 
 let resultsShown = false;
+// Meme victory title when the winner drove a Lord Alto or an Omni E
+function winTitle(rows) {
+  const w = [...rows].sort((a, b) => (a.place || 99) - (b.place || 99))[0];
+  if (!w || w.place !== 1) return null;
+  const def = CARS.find(c => c.id === w.carId);
+  return def && def.winTitle ? { title: def.winTitle, name: w.me ? 'You' : w.name, car: def.name } : null;
+}
 function showResults(mpRows) {
   if (!race) return;
   if (!resultsShown) {
@@ -264,7 +292,7 @@ function showResults(mpRows) {
     race._reward = r;
   }
   const rows = mpRows || race.standings().map(s => ({ ...s, points: s.me ? race._reward.total : null }));
-  ui.results(rows, race._reward.total, race._reward.rows);
+  ui.results(rows, race._reward.total, race._reward.rows, winTitle(rows));
   ui.setPoints(profile.points);
   go('results');
 }
@@ -288,7 +316,8 @@ net.on('crash', e => race?.onRemoteCrash(e));
 net.on('horn', () => audio.horn());
 net.on('finish', e => race?.onRemoteFinish({ pid: e.pid ?? e.p, time: e.time / 1000 }));
 net.on('results', res => {
-  const rows = (res.rows || res).map(r => ({ place: r.place, name: r.name, time: r.time != null ? r.time / 1000 : null, best: r.best != null ? r.best / 1000 : null, me: r.pid === net.me }));
+  const players = net.room?.players || [];
+  const rows = (res.rows || res).map(r => ({ place: r.place, name: r.name, time: r.time != null ? r.time / 1000 : null, best: r.best != null ? r.best / 1000 : null, me: r.pid === net.me, carId: players.find(p => p.pid === r.pid)?.car || (r.pid === net.me ? profile.d.selected : null) }));
   if (race) showResults(rows);
 });
 net.on('left', pid => race?.onRemoteLeft(pid));
@@ -304,7 +333,7 @@ function startCamera() {
   camLook.set(p.x, 1, p.z);
   camera.position.copy(camPos); camera.lookAt(camLook);
 }
-let camSpeed = 0, camThrust = 0;
+let camSpeed = 0, camThrust = 0, camDrift = 0;
 function updateCamera(dt) {
   const p = race.me.phys;
   const v = Math.abs(p.forwardSpeed);
@@ -313,14 +342,18 @@ function updateCamera(dt) {
   // Thrust: the camera lags back when you accelerate or hit nitro, and settles in when you brake
   const accel = (v - camSpeed) / Math.max(dt, 1e-3); camSpeed = v;
   camThrust += (THREE.MathUtils.clamp(accel * 0.05 + (p.nitroOn ? 0.9 : 0), -0.5, 1.4) - camThrust) * Math.min(1, dt * 3);
-  const back = (portrait ? 6.6 : 5.0) + v * 0.035 + camThrust, up = (portrait ? 2.45 : 1.7) + v * 0.007;
+  const back = (portrait ? 7.0 : 5.8) + v * 0.035 + camThrust, up = (portrait ? 2.5 : 1.85) + v * 0.007;
   const fx_ = Math.sin(p.h), fz = Math.cos(p.h);
   const y = track.y ? track.y[p.index] || 0 : 0;
   const tx = p.x - fx_ * back, tz = p.z - fz * back;
   const k = 1 - Math.exp(-dt * 11); // tight follow so turns read instantly
   camPos.x += (tx - camPos.x) * k; camPos.z += (tz - camPos.z) * k; camPos.y += (y + up - camPos.y) * k;
   const ahead = portrait ? 7 : 4.5;
-  camLook.set(p.x + fx_ * ahead, y + (portrait ? 0.55 : 0.95), p.z + fz * ahead);
+  // During a drift the camera eases out to the side of the slide and looks a touch into the corner
+  camDrift += ((p.slipAngle || 0) * (p.driftBlend || 0) - camDrift) * Math.min(1, dt * 4);
+  const rx = Math.cos(p.h), rz = -Math.sin(p.h);
+  camPos.x += rx * camDrift * 1.2 * k; camPos.z += rz * camDrift * 1.2 * k;
+  camLook.set(p.x + fx_ * ahead - rx * camDrift * 1.6, y + (portrait ? 0.55 : 0.95), p.z + fz * ahead - rz * camDrift * 1.6);
   camera.position.copy(camPos);
   camera.lookAt(camLook);
   // Road rumble at high speed: a faint constant buzz on top of impact shake
@@ -375,7 +408,8 @@ function renderMenu(dt, t) {
   menuCam.aspect = innerWidth / innerHeight; menuCam.fov = portrait ? 52 : 40; menuCam.updateProjectionMatrix();
   if (menuCar.userData.halo) menuCar.userData.halo.rotation.y += dt;
   world.update(dt, menuCar.position);
-  renderer.render(world.scene, menuCam);
+  weather?.update(dt, menuCam, 0, menuCar.position);
+  post.render(world.scene, menuCam, dt);
   return true;
 }
 
@@ -383,6 +417,7 @@ function renderMenu(dt, t) {
 function resize() {
   const w = innerWidth, h = innerHeight;
   renderer.setSize(w, h, false);
+  post?.setSize(w, h, renderer.getPixelRatio());
   camera.aspect = w / h; camera.updateProjectionMatrix();
   showCam.aspect = w / h;
   // On portrait phones pull the showroom camera back so the whole car fits
@@ -418,6 +453,11 @@ function frame(now) {
       const p = race.me.phys;
       audio.engine(Math.min(1, Math.abs(p.forwardSpeed) / 50), ctl.throttle, p.nitroOn);
       audio.skid(p.drifting ? Math.min(1, p.driftAmount / 8) : 0);
+      if (weather) {
+        weather.update(dt, camera, p.forwardSpeed, race.me.model.position);
+        if (weather.lightning) post.flash(weather.lightning * 0.6);
+      }
+      post.setSpeedFx(Math.min(1, Math.abs(p.forwardSpeed) / 50), p.nitroOn && screen === 'race');
       speedLines.update(dt, screen === 'race' ? Math.abs(p.forwardSpeed) : 0, p.nitroOn && screen === 'race', 0.5, camera.aspect < 1 ? 0.4 : 0.44);
       input.setNitro?.(p.nitroTank, p.nitroOn);
       // Speed number floating beside your car (Auto Rush style), projected from 3D each frame
@@ -438,7 +478,8 @@ function frame(now) {
         ui.minimap(mm.points, mm.bounds, race.mapCars());
       }
     }
-    renderer.render(world.scene, camera);
+    post.render(world.scene, camera, dt);
+    drawBubbles();
   } else if (screen !== 'garage' && renderMenu(dt, now / 1000)) {
     audio.engine(0, 0, false); audio.skid(0);
     speedLines.clear(); ui.speedTag?.(null, null, 0);
@@ -456,7 +497,35 @@ function frame(now) {
     renderer.render(showroom, showCam);
   }
 }
-let hornHeld = false, hitStopUntil = 0;
+let hornHeld = false, hitStopUntil = 0, controlsHints = 0;
+// Checkpoint joke bubbles: DOM speech bubbles projected above each car's roof
+const bubbleLayer = document.createElement('div');
+bubbleLayer.className = 'bubble-layer';
+canvas.parentElement.insertBefore(bubbleLayer, canvas.nextSibling);
+const bubV = new THREE.Vector3();
+function drawBubbles() {
+  if (!race) return;
+  for (const c of race.cars) {
+    const bb = c.bubble;
+    if (!bb) continue;
+    if (!bb.el) {
+      bb.el = document.createElement('div');
+      bb.el.className = 'speech-bubble';
+      bb.el.textContent = bb.text;
+      bubbleLayer.appendChild(bb.el);
+    }
+    bubV.set(bb.pos.x, bb.pos.y, bb.pos.z).project(camera);
+    const vis = bubV.z < 1 && Math.abs(bubV.x) < 1.2 && Math.abs(bubV.y) < 1.2 && screen === 'race';
+    bb.el.style.display = vis ? '' : 'none';
+    if (!vis) continue;
+    const x = (bubV.x + 1) / 2 * innerWidth, y = (1 - bubV.y) / 2 * innerHeight;
+    // shrink with distance so far-away bubbles don't clutter the view
+    const d = camera.position.distanceTo(bubV.set(bb.pos.x, bb.pos.y, bb.pos.z));
+    const sc = Math.max(0.55, Math.min(1, 14 / d)) * bb.pop;
+    bb.el.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0) translate(-50%, -100%) scale(${sc.toFixed(3)})`;
+    bb.el.style.opacity = bb.opacity.toFixed(2);
+  }
+}
 const tagV = new THREE.Vector3(), tagR = new THREE.Vector3();
 const speedLines = new SpeedLines(canvas.parentElement, canvas);
 
@@ -479,5 +548,5 @@ function boot() {
 }
 let pendingPin = null;
 // Testing hook: open the game with ?debug to inspect the running race from the console
-if (new URLSearchParams(location.search).has('debug')) window.__la = { get race() { return race; }, profile, net };
+if (new URLSearchParams(location.search).has('debug')) window.__la = { get race() { return race; }, profile, net, post, world, renderer, camera, get weather() { return weather; } };
 boot();

@@ -5,7 +5,7 @@ export const BASE_TOP = 44; // m/s (~158 km/h) before stat multipliers
 const BASE_ACCEL = 14.5;
 const BRAKE = 22;
 const NITRO_BURN = 0.32; // tank per second
-const OFFROAD = 2.2; // extra metres before the hard wall
+const OFFROAD = 4.8; // the footpath is drivable; the hard wall sits at its outer edge
 
 export class CarPhysics {
   constructor(stats, nitroMul = 1) {
@@ -19,6 +19,9 @@ export class CarPhysics {
     this.nitroOn = false;
     this.drifting = false;
     this.driftAmount = 0;
+    this.driftBlend = 0; // 0 = full grip, 1 = full drift
+    this.slipAngle = 0;
+    this.driftiness = 1;
     this.offroad = false;
     this.wallHit = 0; // impact speed of a wall hit this step
     this.spin = 0; // seconds of spin-out remaining (after a DHADAAAKK)
@@ -31,7 +34,7 @@ export class CarPhysics {
 
   place(x, z, h) {
     this.x = x; this.z = z; this.h = h;
-    this.vx = this.vz = this.yaw = 0; this.spin = 0;
+    this.vx = this.vz = this.yaw = 0; this.spin = 0; this.driftBlend = 0;
   }
 
   // ctl: { steer, throttle, brake, nitro, drift }
@@ -49,7 +52,7 @@ export class CarPhysics {
     if (wantNitro) this.nitroTank = Math.max(0, this.nitroTank - NITRO_BURN / this.nitroMul * dt);
     this.nitroOn = wantNitro;
 
-    const top = BASE_TOP * s.speed * (this.nitroOn ? 1.28 : 1) * (this.offroad ? 0.55 : 1);
+    const top = BASE_TOP * s.speed * (this.nitroOn ? 1.28 : 1); // no off-road/mud penalty: the verge never slows you
     const accel = BASE_ACCEL * s.accel * (this.nitroOn ? 1.9 : 1);
     this.throttle = spinning ? 0 : ctl.throttle;
     this.brake = spinning ? 0 : ctl.brake;
@@ -66,7 +69,7 @@ export class CarPhysics {
     }
     if (this.nitroOn) vF += accel * 0.35 * dt;
     // Drag and rolling resistance
-    vF -= vF * (0.12 + (this.offroad ? 1.1 : 0)) * dt;
+    vF -= vF * 0.12 * dt;
     if (this.throttle === 0 && this.brake === 0) vF -= Math.sign(vF) * Math.min(Math.abs(vF), 1.6 * dt);
     if (vF > top) vF += (top - vF) * Math.min(1, 2.5 * dt);
 
@@ -79,23 +82,53 @@ export class CarPhysics {
     const lock = 0.55 / (1 + speedAbs / 26) * (0.85 + 0.15 * s.handling) * (0.55 + 0.45 * sens);
     const wheel = this.steer * lock;
 
-    // Drift: handbrake-style. Grip drops so the tail slides; nitro refills from drift.
-    this.drifting = !!ctl.drift && speedAbs > 11 && !spinning;
-    const grip = spinning ? 0.8 : this.drifting ? 2.2 : 9 * s.handling * (this.offroad ? 0.6 : 1);
+    // ---- Drift (arcade): hold DRIFT while turning at speed and the tail slides out ----
+    // driftBlend eases 0..1 so entering and leaving a drift is smooth instead of an instant grip snap.
+    // driftiness is the car's slide character (Omni E slides more, Lord Alto grips more).
+    const dfac = this.driftiness ?? 1;
+    const wantDrift = !!ctl.drift && speedAbs > 10 && !spinning;
+    this.driftBlend += ((wantDrift ? 1 : 0) - this.driftBlend) * Math.min(1, (wantDrift ? 7 : 3.5) * dt);
+    this.drifting = this.driftBlend > 0.35 && speedAbs > 8;
+    const slip = Math.atan2(vR, Math.max(1, Math.abs(vF)));
+    this.slipAngle = slip;
+    let grip;
+    if (spinning) grip = 0.8;
+    else {
+      const baseGrip = 9 * s.handling, driftGrip = 2.1 / dfac;
+      grip = baseGrip + (driftGrip - baseGrip) * this.driftBlend;
+      // Angle limiter: past ~38 degrees the tyres bite back, so a drift never turns into a spin
+      const MAX_SLIP = 0.6;
+      if (Math.abs(slip) > MAX_SLIP) grip += (Math.abs(slip) - MAX_SLIP) * 30;
+      // Counter-steer (steering toward the slide) catches it faster
+      if (this.driftBlend > 0.1 && Math.sign(this.steer) === Math.sign(vR) && Math.abs(vR) > 0.5) grip += Math.abs(this.steer) * 6 * this.driftBlend;
+    }
+    // gripMul: weather (rain = a bit slidier, easier to drift); set by the race
+    grip *= this.gripMul ?? 1;
+    const vRBefore = vR;
     vR *= Math.exp(-grip * dt);
+    // A good drift carries its speed: refill forward speed so a slide only scrubs ~12%/s, never gains speed
+    if (this.driftBlend > 0.3 && vF > 0) {
+      const before = Math.hypot(vF, vRBefore), want = before * (1 - 0.12 * dt) * this.driftBlend + Math.hypot(vF, vR) * (1 - this.driftBlend);
+      const now = Math.hypot(vF, vR);
+      if (now < want) vF = Math.min(top, Math.sqrt(Math.max(0, want * want - vR * vR)));
+    }
 
     let yawTarget = vF * Math.tan(wheel) / WHEELBASE;
-    if (this.drifting) yawTarget *= 1.55;
+    yawTarget *= 1 + 0.6 * this.driftBlend * dfac;
     if (spinning) this.yaw += (Math.sign(this.yaw || 1) * 7 - this.yaw) * Math.min(1, 3 * dt);
-    else this.yaw += (yawTarget - this.yaw) * Math.min(1, (this.drifting ? 9 : 28) * dt);
+    else this.yaw += (yawTarget - this.yaw) * Math.min(1, (28 - 18 * this.driftBlend) * dt);
+    const hOld = this.h;
     this.h += this.yaw * dt;
 
     this.driftAmount = Math.abs(vR);
     if (this.drifting && this.driftAmount > 2) this.nitroTank = Math.min(1, this.nitroTank + this.driftAmount * 0.012 * dt * this.nitroMul);
 
-    // Recompose velocity in the new heading frame
-    const nfx = Math.sin(this.h), nfz = Math.cos(this.h);
-    const nrx = Math.cos(this.h), nrz = -Math.sin(this.h);
+    // Recompose velocity. With grip the velocity turns with the nose (crisp arcade handling); while drifting it
+    // only partly follows, so the nose rotates past the direction of travel and the tail genuinely slides out.
+    const follow = 1 - 0.8 * this.driftBlend;
+    const hf = hOld + (this.h - hOld) * follow;
+    const nfx = Math.sin(hf), nfz = Math.cos(hf);
+    const nrx = Math.cos(hf), nrz = -Math.sin(hf);
     this.vx = nfx * vF + nrx * vR;
     this.vz = nfz * vF + nrz * vR;
     this.x += this.vx * dt;

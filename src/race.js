@@ -3,6 +3,22 @@ import { CARS, ECONOMY } from './config.js';
 import { CarPhysics } from './car.js';
 import { AIDriver } from './ai.js';
 import { buildCarModel, disposeCarModel } from './carModel.js';
+import { SkidMarks } from './skids.js';
+import { CheckpointGates } from './gates.js';
+
+// Small deterministic hash (FNV-1a) so every client picks the same cars for checkpoint jokes
+function hash32(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return h >>> 0;
+}
+const JOKE_CARS = new Set(['lordAlto', 'omniE']);
+const BUBBLE_LIFE = 2.6;
+
+// Comic speech bubble state; main.js draws it as a crisp DOM bubble projected above the car's roof
+// (DOM text stays sharp and is unaffected by bloom/post-processing).
+function makeBubble(text) { return { text, t: 0, pos: { x: 0, y: 0, z: 0 }, pop: 0, opacity: 0, el: null }; }
+function disposeBubble(scene, b) { if (b.el) b.el.remove(); b.el = null; }
 
 const RIVAL_NAMES = ['Jignesh', 'Hetal', 'Bhavin', 'Kinjal', 'Parth', 'Dhruvi', 'Chirag', 'Nirali', 'Mihir', 'Foram'];
 const CAR_RADIUS = 0.8; // two circles per car, 0.9 m ahead/behind the centre
@@ -100,9 +116,10 @@ export class Race {
       }
     } else {
       const n = opts.rivals ?? 7;
-      const pool = CARS.filter(c => c.id !== 'lordAlto');
+      const pool = CARS.filter(c => !c.starter);
+      const starters = { 0: 'omniE', 1: 'lordAlto', 4: 'omniE' };
       for (let i = 0; i < n; i++) {
-        const def = pool[(i * 3 + 1) % pool.length];
+        const def = starters[i] ? CARS.find(c => c.id === starters[i]) : pool[(i * 3 + 1) % pool.length];
         const skill = opts.difficulty * (0.95 + (i / Math.max(1, n - 1)) * 0.09);
         const e = this._addCar({ isAI: true, name: RIVAL_NAMES[i % RIVAL_NAMES.length], carId: def.id,
           mods: { plate: `GJ 06 ${String.fromCharCode(65 + i)}${String.fromCharCode(75 + i)} ${1000 + i * 1111}` },
@@ -113,9 +130,15 @@ export class Race {
       const order = [...this.cars.filter(c => !c.isPlayer), this.me];
       order.forEach((c, i) => { const g = this.track.grid(i); c.phys.place(g.x, g.z, g.h); });
     }
+    // Ordered checkpoints (School Se Ghar Tak). Intermediate ones sit at their landmark; the last is the finish line.
+    this._setupCheckpoints();
+    if (this.cps) this.gates = new CheckpointGates(this.o.scene, this.track, this.cps.all.map(cp => cp.finish ? cp : (this.cps.ints.find(x => x.id === cp.id) || cp)));
+    this.skids = new SkidMarks(this.o.scene);
     for (const c of this.cars) {
+      c.phys.gripMul = opts.weather === 'rain' ? 0.82 : 1;
+      c.phys.driftiness = c.def.driftiness ?? 1;
       const n = this.track.nearest(c.phys.x, c.phys.z);
-      c.phys.index = n.index; c.lastIndex = n.index;
+      c.phys.index = n.index; c.lastIndex = n.index; c.cpLast = n.index;
       this._syncModel(c, 0);
     }
   }
@@ -131,6 +154,7 @@ export class Race {
       lap: 0, half: false, lapStart: 0, bestLap: Infinity, lapTimes: [],
       finished: false, finishTime: null, place: 0, progress: 0,
       wheelSpin: 0, driftMeters: 0, dhadaaks: 0, stuck: 0, overtakes: 0, lastPlace: 0,
+      cpNext: 0, cpDone: false, cpLaps: 0, driftScore: 0, driftRun: 0, driftRunScore: 0, driftTime: 0,
     };
     if (!o.isPlayer) {
       e.tag = makeNameTag(o.name, (o.mods && o.mods.paint) || def.paint, this.o.avatars?.get(o.pid));
@@ -138,7 +162,7 @@ export class Race {
     } else {
       // Glowing ring on the road under your own car, so you always spot yourself in the pack
       const mat = new THREE.MeshBasicMaterial({ color: '#fff3b0', transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
-      e.ring = new THREE.Mesh(new THREE.RingGeometry(2.05, 2.32, 64), mat);
+      e.ring = new THREE.Mesh(new THREE.RingGeometry(2.0, 2.12, 72), mat);
       e.ring.rotation.x = -Math.PI / 2;
       e.ring.renderOrder = 2;
       this.o.scene.add(e.ring);
@@ -151,7 +175,10 @@ export class Race {
     for (const c of this.cars) {
       this.o.scene.remove(c.model); disposeCarModel(c.model); disposeTag(this.o.scene, c.tag);
       if (c.ring) { this.o.scene.remove(c.ring); c.ring.geometry.dispose(); c.ring.material.dispose(); }
+      if (c.bubble) disposeBubble(this.o.scene, c.bubble);
     }
+    this.skids?.dispose();
+    this.gates?.dispose();
     this.cars = [];
   }
 
@@ -205,7 +232,7 @@ export class Race {
     const live = this.phase !== 'countdown';
 
     for (const c of this.cars) {
-      if (c.isRemote) { this._interpolateRemote(c); continue; }
+      if (c.isRemote) { this._interpolateRemote(c); if (live) this._checkpoints(c); continue; }
       let ctl = { steer: 0, throttle: 0, brake: 0, nitro: false, drift: false };
       if (live && !c.finished) {
         if (c.isPlayer) ctl = input;
@@ -218,18 +245,26 @@ export class Race {
       c.phys.step(dt, ctl, this.track);
       if (c.isPlayer && c.phys.nitroOn && !was) this.o.onEvent?.('nitro');
       if (c.isPlayer && c.phys.wallHit > 6) this.o.onEvent?.('wall', { power: Math.min(1, c.phys.wallHit / 25), pos: c.phys });
-      if (c.phys.drifting) { c.driftMeters += c.phys.speed * dt; c.driftRun = (c.driftRun || 0) + c.phys.speed * dt; }
-      else if (c.driftRun) {
+      const ang = Math.abs(c.phys.slipAngle || 0);
+      if (c.phys.drifting && ang > 0.14 && c.phys.speed > 9) {
+        const d = c.phys.speed * dt;
+        c.driftMeters += d; c.driftRun += d; c.driftTime += dt;
+        // angle factor (sweet spot 20-38 deg) x combo for holding it
+        c.driftRunScore += d * Math.min(1.3, ang / 0.45) * (1 + Math.min(2, c.driftTime / 1.5));
+      } else if (c.driftRun) {
         // A drift just ended: bank it as a popup if it was a proper one
-        if (c.isPlayer && c.driftRun > 25) this.o.onEvent?.('driftbank', { meters: Math.round(c.driftRun) });
-        c.driftRun = 0;
+        if (c.isPlayer && c.driftRun > 20) this.o.onEvent?.('driftbank', { meters: Math.round(c.driftRun), points: Math.round(c.driftRunScore * 0.5), combo: Math.min(3, 1 + c.driftTime / 1.5) });
+        c.driftScore += c.driftRunScore;
+        c.driftRun = 0; c.driftRunScore = 0; c.driftTime = 0;
       }
+      this._checkpoints(c);
       this._laps(c);
       this._stuck(c, dt, ctl);
     }
 
     this._collisions();
     this._positions();
+    if (this.gates) { this.gates.setNext(this.me.cpNext); this.gates.update(performance.now() / 1000); }
     for (const c of this.cars) this._syncModel(c, dt);
     this._fx(dt);
 
@@ -274,12 +309,56 @@ export class Race {
     const n = this.track.nearest(p.x, p.z, p.index); p.index = n.index; p.lateral = n.lateral;
   }
 
+  _setupCheckpoints() {
+    const cps = this.track.def && this.track.def.checkpoints;
+    this.cps = null;
+    if (!cps || !cps.length) return;
+    const ints = [];
+    for (const cp of cps) {
+      if (cp.finish) continue;
+      const lm = this.track.landmarks.find(l => l.id === cp.id);
+      if (lm) ints.push({ ...cp, index: lm.index });
+    }
+    ints.sort((a, b) => a.index - b.index);
+    this.cps = { all: cps, ints, finish: cps.find(c => c.finish) || null };
+    // Same seed on every client: the server's grid order (multiplayer) or a fresh random one (single player)
+    this.seed = this.o.grid ? this.o.grid.join(',') : String(Math.random());
+  }
+
+  // Ordered checkpoint crossing for any car (also remote cars, so the jokes match on every screen)
+  _checkpoints(c) {
+    if (!this.cps) return;
+    const N = this.track.N, i = c.phys.index, last = c.cpLast ?? i;
+    c.cpLast = i;
+    const ints = this.cps.ints;
+    if (c.cpNext < ints.length) {
+      const idx = ints[c.cpNext].index;
+      // crossed going forward (ignore big jumps like respawns going backwards)
+      if (last < idx && i >= idx && i - last < 250) { this._cpHit(c, ints[c.cpNext]); c.cpNext++; }
+    } else if (last > N - 80 && i < 80) {
+      // Finish line after every checkpoint
+      if (this.cps.finish) this._cpHit(c, this.cps.finish);
+      c.cpNext = 0; c.cpDone = true; c.cpLaps++;
+    }
+  }
+
+  _cpHit(c, cp) {
+    if (c.isPlayer) this.o.onEvent?.('checkpoint', { name: cp.name, n: this.cps.all.indexOf(cp) + 1, total: this.cps.all.length });
+    if (!cp.msg || !JOKE_CARS.has(c.def.id)) return;
+    // Deterministic pick: about half of the eligible cars show the joke each time
+    if (hash32(this.seed + '|' + c.pid + '|' + cp.id + '|' + c.cpLaps) % 100 >= 50) return;
+    if (c.bubble) disposeBubble(this.o.scene, c.bubble);
+    c.bubble = makeBubble(cp.msg);
+  }
+
   _laps(c) {
     const N = this.track.N, i = c.phys.index, last = c.lastIndex;
     if (i > N * 0.4 && i < N * 0.6) c.half = true;
     const crossed = last > N - 80 && i < 80;
     const back = last < 80 && i > N - 80;
-    if (crossed && (c.half || c.lap === 0)) {
+    const lapOk = this.cps ? c.cpDone : c.half;
+    if (crossed && (lapOk || c.lap === 0)) {
+      c.cpDone = false;
       if (c.lap > 0) {
         const lt = this.time - c.lapStart;
         c.lapTimes.push(lt); c.bestLap = Math.min(c.bestLap, lt);
@@ -302,7 +381,7 @@ export class Race {
     const p = c.phys;
     if (this.phase === 'countdown' || c.isRemote) return;
     if (p.speed < 1.5 && (ctl.throttle > 0.5 || c.ai)) c.stuck += dt; else c.stuck = 0;
-    const far = Math.abs(p.lateral) > this.track.halfWidth + 6;
+    const far = Math.abs(p.lateral) > this.track.halfWidth + 9;
     if (c.stuck > (c.ai ? 2.5 : 4) || far || (c.isPlayer && ctl.respawn)) this.respawn(c);
   }
 
@@ -407,11 +486,21 @@ export class Race {
     }
     if (u.brakeMat) u.brakeMat.emissiveIntensity = p.brake > 0.1 && v > 0.5 ? 2.5 : 0.35;
     if (u.halo) u.halo.position.y = (u.haloBase ??= u.halo.position.y) + Math.sin(performance.now() / 400) * 0.06;
+    if (c.bubble) {
+      const bb = c.bubble;
+      bb.t += dt;
+      const t = bb.t;
+      // pop in with a little overshoot, float up gently, fade out
+      bb.pop = t < 0.25 ? Math.sin((t / 0.25) * Math.PI * 0.5) * 1.12 : t < 0.4 ? 1.12 - (t - 0.25) / 0.15 * 0.12 : 1;
+      bb.pos.x = p.x; bb.pos.y = y + 2.3 + t * 0.35; bb.pos.z = p.z;
+      bb.opacity = t > BUBBLE_LIFE - 0.5 ? Math.max(0, (BUBBLE_LIFE - t) / 0.5) : 1;
+      if (t > BUBBLE_LIFE) { disposeBubble(this.o.scene, bb); c.bubble = null; }
+    }
     if (c.ring) {
       c.ring.position.set(p.x, y + 0.06, p.z);
       const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 160);
       c.ring.material.color.set(p.nitroOn ? '#7fe9ff' : p.drifting ? '#ffc533' : '#fff3b0');
-      c.ring.material.opacity = p.nitroOn ? 0.7 + pulse * 0.25 : 0.5;
+      c.ring.material.opacity = p.nitroOn ? 0.55 + pulse * 0.25 : 0.32;
       const s = p.nitroOn ? 1.06 + pulse * 0.05 : 1;
       c.ring.scale.set(s, s, s);
     }
@@ -440,11 +529,21 @@ export class Race {
           fx.smoke(tmpV, { x: -p.vx * 0.05, y: 0.6, z: -p.vz * 0.05 }, Math.min(1, p.driftAmount / 8));
         }
       }
+      if (p.drifting && Math.abs(p.slipAngle || 0) > 0.12 && p.speed > 8) {
+        for (const side of [-0.62, 0.62]) this.skids.add(c, side, bx + Math.cos(p.h) * side, bz - Math.sin(p.h) * side, p.h, Math.min(1, Math.abs(p.slipAngle) / 0.5));
+      } else this.skids.lift(c);
       if (p.nitroOn && u.exhaust) {
         u.exhaust.getWorldPosition(tmpV);
-        fx.nitro(tmpV, { x: -Math.sin(p.h), y: 0, z: -Math.cos(p.h) });
+        fx.nitro(tmpV, { x: -Math.sin(p.h), y: 0, z: -Math.cos(p.h) }, { x: p.vx, y: 0, z: p.vz });
       }
       if (p.offroad && p.speed > 8 && Math.random() < 0.5) { tmpV.set(bx, 0.2, bz); fx.dust(tmpV); }
+      // Rain: water spray off both rear wheels
+      if (this.o.weather === 'rain' && p.speed > 6 && fx.spray) {
+        for (const side of [-0.62, 0.62]) {
+          tmpV.set(bx + Math.cos(p.h) * side, 0.2, bz - Math.sin(p.h) * side);
+          fx.spray(tmpV, { x: p.vx, y: 0, z: p.vz }, Math.min(1, p.speed / 30));
+        }
+      }
       if (p.wallHit > 6) { tmpV.set(p.x, 0.5, p.z); fx.sparks(tmpV, 10); }
     }
     fx.update(dt);
@@ -459,9 +558,14 @@ export class Race {
       lapTime: this.time - this.me.lapStart,
       best: isFinite(this.me.bestLap) ? this.me.bestLap : null,
       speedKmh: Math.round(Math.abs(p.forwardSpeed) * 3.6),
-      nitro01: p.nitroTank, nitroOn: p.nitroOn,
+      nitro01: p.nitroTank, nitroOn: p.nitroOn, driftOn: p.drifting,
       drift: p.drifting ? Math.round(this.me.driftMeters) : 0,
       wrongWay: this.wrongWayTime > 1.2,
+      checkpoint: this.cps ? (() => {
+        const n = this.me.cpNext, ints = this.cps.ints;
+        const next = n < ints.length ? ints[n] : this.cps.finish;
+        return next ? { name: next.name, n: Math.min(n + 1, this.cps.all.length), total: this.cps.all.length } : null;
+      })() : null,
     };
   }
 
@@ -475,7 +579,8 @@ export class Race {
     const place = me.place;
     const rows = [];
     rows.push(['Finish P' + place, ECONOMY.placePoints[Math.min(place, 8) - 1] || 80]);
-    if (me.driftMeters > 10) rows.push(['Drift ' + Math.round(me.driftMeters) + ' m', Math.round(me.driftMeters * ECONOMY.driftPerMeter)]);
+    const ds = me.driftScore + me.driftRunScore;
+    if (me.driftMeters > 10) rows.push(['Drift ' + Math.round(me.driftMeters) + ' m', Math.round(Math.max(me.driftMeters * ECONOMY.driftPerMeter, ds * 0.5))]);
     if (me.dhadaaks) rows.push(['DHADAAAKK x' + me.dhadaaks, me.dhadaaks * ECONOMY.dhadaakBonus]);
     if (me.overtakes) rows.push(['Overtakes x' + me.overtakes, me.overtakes * ECONOMY_OVERTAKE]);
     const total = rows.reduce((s, r) => s + r[1], 0);
@@ -484,7 +589,7 @@ export class Race {
 
   standings() {
     return [...this.cars].sort((a, b) => a.place - b.place).map(c => ({
-      place: c.place, name: c.isPlayer ? (c.name || 'You') : c.name, car: c.def.name,
+      place: c.place, name: c.isPlayer ? (c.name || 'You') : c.name, car: c.def.name, carId: c.def.id, pid: c.pid,
       time: c.finished ? c.finishTime : null, best: isFinite(c.bestLap) ? c.bestLap : null, me: c.isPlayer,
     }));
   }

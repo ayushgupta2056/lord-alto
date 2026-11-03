@@ -355,7 +355,7 @@ export class Net {
           this._emit('go', { startAt });
           break;
         }
-        const p = { track: m.track, laps: m.laps, timeOfDay: m.timeOfDay, grid: m.grid || [], startAt };
+        const p = { track: m.track, laps: m.laps, timeOfDay: m.timeOfDay, weather: m.weather || 'clear', grid: m.grid || [], startAt };
         this._lastPrepare = p;
         this._emit('prepare', p);
         if (startAt !== null) this._emit('go', { startAt });
@@ -452,12 +452,13 @@ export class Net {
 
   setCar(car, mods) { this._send({ t: 'car', car, mods }); }
 
-  /** Host only. Any subset of { track, laps, timeOfDay }. */
+  /** Host only. Any subset of { track, laps, timeOfDay, weather }. */
   setSettings(settings) {
     const s = {};
     if (settings?.track !== undefined) s.track = settings.track;
     if (settings?.laps !== undefined) s.laps = settings.laps;
     if (settings?.timeOfDay !== undefined) s.timeOfDay = settings.timeOfDay;
+    if (settings?.weather !== undefined) s.weather = settings.weather;
     this._send({ t: 'settings', ...s });
   }
 
