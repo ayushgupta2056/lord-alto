@@ -29,18 +29,18 @@ const LOOKS = {
     lift: [0.015, 0.0, 0.032], gamma: [0.98, 1.0, 1.03], gain: [1.08, 0.985, 0.88],
     shadowTint: [0.015, -0.01, 0.05], highTint: [0.05, 0.015, -0.035],
     vignette: 0.36, grain: 0.028,
-    bloom: { strength: 0.55, radius: 0.62, threshold: 0.85 },
+    bloom: { strength: 0.5, radius: 0.62, threshold: 1.0 },
   },
   night: {
     exposure: 1.12, contrast: 1.1, saturation: 1.12,
     lift: [0.004, 0.004, 0.026], gamma: [1.0, 1.0, 1.04], gain: [1.06, 0.99, 0.9],
     shadowTint: [0.0, 0.005, 0.045], highTint: [0.05, 0.02, -0.03],
     vignette: 0.42, grain: 0.035,
-    bloom: { strength: 0.75, radius: 0.6, threshold: 0.62 },
+    bloom: { strength: 0.62, radius: 0.6, threshold: 0.98 },
   },
 };
 // Rain: cooler, flatter, a touch more glare.
-const RAIN = { saturation: 0.86, contrast: 0.97, gain: [0.97, 0.99, 1.04], lift: [0.0, 0.006, 0.02], bloomStrength: 1.2, bloomThreshold: 0.88, haze: 0.08 };
+const RAIN = { saturation: 0.86, contrast: 0.97, gain: [0.97, 0.99, 1.04], lift: [0.0, 0.006, 0.02], bloomStrength: 1.1, bloomThreshold: 1.0, haze: 0.08 };
 
 // ---------------------------------------------------------------- grade shader
 const GradeShader = {

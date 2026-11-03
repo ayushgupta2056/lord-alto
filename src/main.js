@@ -548,5 +548,5 @@ function boot() {
 }
 let pendingPin = null;
 // Testing hook: open the game with ?debug to inspect the running race from the console
-if (new URLSearchParams(location.search).has('debug')) window.__la = { get race() { return race; }, profile, net, post, world, renderer, camera, get weather() { return weather; } };
+if (new URLSearchParams(location.search).has('debug')) window.__la = { get race() { return race; }, profile, net, post, world, renderer, camera, audio, get weather() { return weather; } };
 boot();

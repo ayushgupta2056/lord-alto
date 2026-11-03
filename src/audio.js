@@ -227,6 +227,30 @@ export class GameAudio {
 
     this._buildEngine();
     this._buildSkid();
+    this._buildWind();
+  }
+
+  /** Wind + road roar: filtered noise that swells with speed, so going fast sounds fast even when the engine
+   *  is just cycling through its gears. Low band = tyre/road rumble, high band = wind rush. */
+  _buildWind() {
+    const c = this.ctx;
+    this.windGain = c.createGain(); this.windGain.gain.value = 0;
+    this.windHi = c.createBiquadFilter(); this.windHi.type = 'bandpass'; this.windHi.frequency.value = 900; this.windHi.Q.value = 0.6;
+    this.roadLo = c.createBiquadFilter(); this.roadLo.type = 'lowpass'; this.roadLo.frequency.value = 220; this.roadLo.Q.value = 0.9;
+    this.roadGain = c.createGain(); this.roadGain.gain.value = 0;
+    this.noiseLoop.connect(this.windHi).connect(this.windGain).connect(this.engBus);
+    this.noiseLoop.connect(this.roadLo).connect(this.roadGain).connect(this.engBus);
+  }
+
+  _wind(t, s, nitro, active) {
+    if (!this.windGain) return;
+    // quadratic in speed: silent when slow, a real rush near top speed; nitro pushes it further
+    // (nitro only brightens it; the turbo layer already adds loudness, so the mix stays out of the limiter)
+    const w = active * Math.pow(s, 1.6);
+    this.windGain.gain.setTargetAtTime(Math.min(0.2, w * 0.2), t, 0.12);
+    this.windHi.frequency.setTargetAtTime(500 + s * 1700 + nitro * 500, t, 0.15);
+    this.roadGain.gain.setTargetAtTime(active * Math.min(0.3, s * 0.3), t, 0.12);
+    this.roadLo.frequency.setTargetAtTime(120 + s * 260, t, 0.15);
   }
 
   /** PeriodicWave for one 4-stroke cycle of a 3-cylinder: 3 exhaust pulses, slightly uneven in size and timing. */
@@ -355,6 +379,7 @@ export class GameAudio {
     const s = clamp01(Math.abs(speed01)), th = clamp01(throttle);
     const nIn = nitro ? (typeof nitro === 'number' ? clamp01(nitro) : 1) : 0;
     const active = this._active();
+    this._wind(t, s, nIn, active);
 
     // turbo spool: quick up, slower down
     this._nit += (nIn - this._nit) * Math.min(1, dt * (nIn > this._nit ? 5 : 2.2));
@@ -462,6 +487,7 @@ export class GameAudio {
     this.engOut.gain.setTargetAtTime(0, t, 0.08);
     this.whineGain.gain.setTargetAtTime(0, t, 0.08);
     this.skidGain.gain.setTargetAtTime(0, t, 0.05);
+    if (this.windGain) { this.windGain.gain.setTargetAtTime(0, t, 0.08); this.roadGain.gain.setTargetAtTime(0, t, 0.08); }
     this._engG = 0;
     this._onTime = 0;
   }

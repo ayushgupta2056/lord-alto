@@ -151,7 +151,9 @@ export class CarPhysics {
       const into = (this.vx * sideX + this.vz * sideZ) * sign;
       if (into > 0) {
         this.vx -= sideX * sign * into * 1.25; this.vz -= sideZ * sign * into * 1.25;
-        this.vx *= 0.93; this.vz *= 0.93;
+        // Arcade wall: a hard hit costs a chunk of speed once; grinding along the wall only scrapes a little
+        const keep = into > 6 ? 1 - Math.min(0.3, into * 0.018) : Math.exp(-0.9 * dt);
+        this.vx *= keep; this.vz *= keep;
         this.wallHit = into;
       }
     }
