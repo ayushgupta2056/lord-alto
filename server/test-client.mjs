@@ -150,7 +150,7 @@ await step('B and C join with PIN', async () => {
   assert(wc.room.players.length === 3, `players ${wc.room.players.length}`);
   const pb = wc.room.players.find((p) => p.pid === pidB);
   assert(pb.mods.paint === null && pb.mods.tint === 1, 'mods not sanitised');
-  assert(wc.room.players.find((p) => p.pid === pidC).car === 'alto2000', 'car not sanitised');
+  assert(wc.room.players.find((p) => p.pid === pidC).car === 'lordAlto', 'car not sanitised (falls back to the first car, Lord Alto)');
   await A.wait((m) => m.t === 'room' && m.room.players.length === 3, 3000, 'room with 3 players');
 });
 
