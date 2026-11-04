@@ -44,6 +44,10 @@ CARS.unshift(
   { id: 'omniE', name: 'OMNI E', era: '1984–2019', tagline: 'Sliding doors, zero fear. The van everyone knows.', price: 0, starter: true,
     stats: { speed: 0.99, accel: 1.05, handling: 0.98 }, nitroMul: 1.2, driftiness: 1.3, winTitle: '🚐 CERTIFIED KIDNAPER 💀',
     shape: { gen: 'omni', length: 3.37, width: 1.40, height: 1.64 }, paint: '#f4f4f0' },
+  // Two-wheeler: instant electric torque, slips through gaps, but light, so it gets shoved around in a crash
+  { id: 'evBike', name: 'EV BIKE', era: 'Electric', tagline: 'Silent, zippy, squeezes through any gap', price: 0, starter: true,
+    stats: { speed: 0.96, accel: 1.14, handling: 1.12 }, nitroMul: 1.3, driftiness: 1.1, winTitle: '⚡ SILENT KILLER 🛵',
+    bike: true, mass: 0.45, shape: { gen: 'scooter', length: 1.85, width: 0.7, height: 1.12 }, paint: '#d81e22' },
 );
 
 export const PAINTS = ['#d8dde3', '#f2f2f0', '#1b1b1f', '#b3121d', '#c8102e', '#1f4fa8', '#2e8b57', '#e5601d', '#f6c62a', '#7b2cbf', '#ff4f9a', '#00b4d8', '#9aa3ad', '#d4af37'];

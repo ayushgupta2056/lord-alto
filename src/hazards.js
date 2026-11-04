@@ -131,7 +131,7 @@ export class Hazards {
   collide(p) {
     let hit = 0;
     for (const h of this.near(p.index, 12)) {
-      const dx = p.x - h.x, dz = p.z - h.z, d = Math.hypot(dx, dz), rr = h.r + 0.95;
+      const dx = p.x - h.x, dz = p.z - h.z, d = Math.hypot(dx, dz), rr = h.r + (p.halfW ?? 0.95);
       if (d >= rr || d < 1e-4) continue;
       const nx = dx / d, nz = dz / d;
       p.x += nx * (rr - d); p.z += nz * (rr - d);

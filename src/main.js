@@ -196,6 +196,7 @@ function loadTrack(id, timeOfDay, weatherKind = 'clear') {
 
 function playerOpts() {
   const id = profile.d.selected, def = CARS.find(c => c.id === id);
+  audio.setEV?.(!!def.bike); // electric motor voice for the EV Bike
   return { carId: id, mods: profile.mods(id), stats: profile.stats(id), nitroMul: def.nitroMul, name: profile.d.name || 'You' };
 }
 
@@ -344,7 +345,9 @@ function updateCamera(dt) {
   // Thrust: the camera lags back when you accelerate or hit nitro, and settles in when you brake
   const accel = (v - camSpeed) / Math.max(dt, 1e-3); camSpeed = v;
   camThrust += (THREE.MathUtils.clamp(accel * 0.05 + (p.nitroOn ? 0.9 : 0), -0.5, 1.4) - camThrust) * Math.min(1, dt * 3);
-  const back = (portrait ? 7.0 : 5.8) + v * 0.035 + camThrust, up = (portrait ? 2.5 : 1.85) + v * 0.007;
+  // The EV Bike is half a car's size: sit closer and a bit lower so it fills the frame like a car does
+  const sz = race.me.def.bike ? 0.7 : 1;
+  const back = ((portrait ? 7.0 : 5.8) + v * 0.035) * sz + camThrust, up = ((portrait ? 2.5 : 1.85) + v * 0.007) * (race.me.def.bike ? 0.85 : 1);
   const fx_ = Math.sin(p.h), fz = Math.cos(p.h);
   const y = track.y ? track.y[p.index] || 0 : 0;
   const tx = p.x - fx_ * back, tz = p.z - fz * back;

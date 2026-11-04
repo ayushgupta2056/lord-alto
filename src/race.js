@@ -148,6 +148,8 @@ export class Race {
     for (const c of this.cars) {
       c.phys.gripMul = opts.weather === 'rain' ? 0.82 : 1;
       c.phys.driftiness = c.def.driftiness ?? 1;
+      if (c.def.bike) { c.phys.colR = 0.42; c.phys.colOff = 0.55; c.phys.halfW = 0.5; }
+      c.phys.mass = c.def.mass ?? 1;
       const n = this.track.nearest(c.phys.x, c.phys.z);
       c.phys.index = n.index; c.lastIndex = n.index; c.cpLast = n.index;
       this._syncModel(c, 0);
@@ -436,40 +438,44 @@ export class Race {
       // Deepest overlapping pair of circles
       let best = null;
       const fax = Math.sin(pa.h), faz = Math.cos(pa.h), fbx = Math.sin(pb.h), fbz = Math.cos(pb.h);
+      const rA = pa.colR, rB = pb.colR, reach = rA + rB;
       for (const sa of CAR_CIRCLES) for (const sb of CAR_CIRCLES) {
-        const ax = pa.x + fax * sa, az = pa.z + faz * sa;
-        const bx = pb.x + fbx * sb, bz = pb.z + fbz * sb;
+        const ax = pa.x + fax * sa * pa.colOff, az = pa.z + faz * sa * pa.colOff;
+        const bx = pb.x + fbx * sb * pb.colOff, bz = pb.z + fbz * sb * pb.colOff;
         const dx = bx - ax, dz = bz - az, d = Math.hypot(dx, dz);
-        if (d < CAR_RADIUS * 2 && (!best || d < best.d)) best = { d, ax, az, nx: dx / (d || 1), nz: dz / (d || 1) };
+        if (d < reach && (!best || d < best.d)) best = { d, ax, az, nx: dx / (d || 1), nz: dz / (d || 1) };
       }
       if (!best) continue;
       const { nx, nz } = best;
-      const overlap = CAR_RADIUS * 2 - best.d;
+      const overlap = reach - best.d;
       // Contact point (on A's circle surface) and its offset from each car's centre
-      const cx = best.ax + nx * CAR_RADIUS, cz = best.az + nz * CAR_RADIUS;
+      const cx = best.ax + nx * rA, cz = best.az + nz * rA;
       const rax = cx - pa.x, raz = cz - pa.z, rbx = cx - pb.x, rbz = cz - pb.z;
       const rvx = pb.vx - pa.vx, rvz = pb.vz - pa.vz;
       const vn = rvx * nx + rvz * nz; // < 0 = closing
       const closing = -vn;
       // Positional fix: soft and shared (80% per step), so cars neither jitter nor glue together
       const corr = Math.max(0, overlap - 0.02) * 0.8;
-      const wa = A.isRemote ? 0 : 0.5, wb = B.isRemote ? 0 : 0.5;
+      // the lighter vehicle gives way more (an EV Bike gets pushed, an Alto barely moves)
+      const ma = pa.mass, mb = pb.mass, share = mb / (ma + mb);
+      const wa = A.isRemote ? 0 : share, wb = B.isRemote ? 0 : 1 - share;
       pa.x -= nx * corr * wa; pa.z -= nz * corr * wa;
       pb.x += nx * corr * wb; pb.z += nz * corr * wb;
       if (closing > 0) {
-        // Equal masses: normal impulse that leaves them separating at RESTITUTION x the closing speed
-        const jn = (1 + RESTITUTION) * closing / 2;
+        // Normal impulse that leaves them separating at RESTITUTION x the closing speed (mass-weighted)
+        const inv = 1 / ma + 1 / mb;
+        const jn = (1 + RESTITUTION) * closing / inv;
         // Friction along the contact, at most FRICTION x jn and never more than evens out the sliding
         let tx = rvx - vn * nx, tz = rvz - vn * nz;
         const vt = Math.hypot(tx, tz);
-        const jt = vt > 1e-3 ? Math.min(FRICTION * jn, vt / 2) : 0;
+        const jt = vt > 1e-3 ? Math.min(FRICTION * jn, vt / inv) : 0;
         if (vt > 1e-3) { tx /= vt; tz /= vt; }
         // Impulse on B (A gets the opposite). The friction part drags B toward A's sliding motion.
         const Jx = nx * jn - tx * jt, Jz = nz * jn - tz * jt;
         // Yaw kick: torque of the impulse about the car centre (generalised force for heading h)
         const kick = (rx, rz, jx, jz) => Math.max(-3, Math.min(3, (jx * rz - jz * rx) / INERTIA * KNOCK));
-        if (!A.isRemote) { pa.vx -= Jx; pa.vz -= Jz; pa.kick += kick(rax, raz, -Jx, -Jz); }
-        if (!B.isRemote) { pb.vx += Jx; pb.vz += Jz; pb.kick += kick(rbx, rbz, Jx, Jz); }
+        if (!A.isRemote) { pa.vx -= Jx / ma; pa.vz -= Jz / ma; pa.kick += kick(rax, raz, -Jx, -Jz) / ma; }
+        if (!B.isRemote) { pb.vx += Jx / mb; pb.vz += Jz / mb; pb.kick += kick(rbx, rbz, Jx, Jz) / mb; }
       }
       // DHADAAAKK: ramming another car with nitro on
       const key = A.pid + '|' + B.pid;
@@ -530,7 +536,12 @@ export class Race {
     c.wheelSpin += v * dt / (u.radius || 0.29);
     if (u.wheels) for (const w of u.wheels) w.rotation.x = c.wheelSpin;
     if (u.wheelPivots) for (const w of u.wheelPivots) w.rotation.y = p.steer * 0.5;
-    if (u.body) {
+    if (u.body && u.bike) {
+      // two-wheeler: lean INTO the turn (more with speed), a little wobble while drifting
+      const leanT = THREE.MathUtils.clamp(p.yaw * Math.abs(v) * 0.03, -0.55, 0.55) + (p.drifting ? Math.sin(performance.now() / 90) * 0.02 : 0);
+      u.body.rotation.z += (leanT - u.body.rotation.z) * Math.min(1, dt * 7);
+      u.body.rotation.x += ((p.brake > 0 && v > 1 ? 0.04 : 0) - (p.nitroOn ? 0.05 : 0) - u.body.rotation.x) * Math.min(1, dt * 6);
+    } else if (u.body) {
       const rollT = THREE.MathUtils.clamp(-p.yaw * Math.abs(v) * 0.0045, -0.09, 0.09);
       const pitchT = THREE.MathUtils.clamp((p.brake > 0 && v > 1 ? 0.03 : 0) - (p.throttle > 0 ? 0.012 : 0), -0.05, 0.05);
       u.body.rotation.z += (rollT - u.body.rotation.z) * Math.min(1, dt * 8);

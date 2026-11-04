@@ -368,6 +368,46 @@ export class GameAudio {
 
   _active() { return this._screen == null || ENGINE_SCREENS.has(this._screen) ? 1 : 0; }
 
+  // ------------------------------------------------------------------ electric motor (EV Bike)
+  /** Switch the engine voice: false = 3-cylinder petrol, true = electric hub motor (whine + inverter hiss). */
+  setEV(on) {
+    this._ev = !!on;
+    if (this.ctx && !on && this.evOut) this.evOut.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05);
+  }
+
+  _buildEV() {
+    const c = this.ctx;
+    this.evOut = this._gain(0, this.engBus);
+    this.evLP = this._filter('lowpass', 2500, 0.7);
+    this.evLP.connect(this.evOut);
+    // motor whine: two sines a fifth-ish apart plus a soft saw for bite, all tracking speed
+    this.evA = c.createOscillator(); this.evA.type = 'sine';
+    this.evB = c.createOscillator(); this.evB.type = 'sine';
+    this.evC = c.createOscillator(); this.evC.type = 'sawtooth';
+    this.evBG = this._gain(0.45, this.evLP); this.evCG = this._gain(0.06, this.evLP);
+    this.evA.connect(this.evLP); this.evB.connect(this.evBG); this.evC.connect(this.evCG);
+    for (const o of [this.evA, this.evB, this.evC]) { o.frequency.value = 120; o.start(); }
+    // inverter hiss under load
+    this.evHissBP = this._filter('bandpass', 6000, 1.2);
+    this.evHiss = this._gain(0, this.evOut);
+    this.noiseLoop.connect(this.evHissBP).connect(this.evHiss);
+  }
+
+  _evEngine(t, s, th, nit, active) {
+    if (!this.evOut) this._buildEV();
+    // the petrol voice stays silent while the EV is selected
+    this.engOut.gain.setTargetAtTime(0, t, 0.05);
+    this.whineGain.gain.setTargetAtTime(0, t, 0.05);
+    const f = 140 + s * 1500 + nit * 300;
+    this.evA.frequency.setTargetAtTime(f, t, 0.05);
+    this.evB.frequency.setTargetAtTime(f * 1.498, t, 0.05);
+    this.evC.frequency.setTargetAtTime(f * 0.5, t, 0.05);
+    this.evLP.frequency.setTargetAtTime(1200 + s * 3000 + th * 1500, t, 0.06);
+    const g = active * (dB(-38) + th * dB(-24) + s * dB(-28) + nit * dB(-24));
+    this.evOut.gain.setTargetAtTime(g, t, 0.06);
+    this.evHiss.gain.setTargetAtTime(active * th * (0.02 + s * 0.04), t, 0.05);
+  }
+
   // ------------------------------------------------------------------ continuous
   engine(speed01, throttle, nitro) {
     if (!this.ctx) return;
@@ -384,6 +424,13 @@ export class GameAudio {
     // turbo spool: quick up, slower down
     this._nit += (nIn - this._nit) * Math.min(1, dt * (nIn > this._nit ? 5 : 2.2));
     const nit = this._nit;
+    if (this._ev) {
+      this._evEngine(t, s, th, nit, active);
+      clearTimeout(this._engTO);
+      this._engTO = setTimeout(() => this._silenceEngine(), 300);
+      return;
+    }
+    if (this.evOut) this.evOut.gain.setTargetAtTime(0, t, 0.05);
 
     // ---- gearbox
     let g = this._gear, upshift = false;
@@ -486,6 +533,7 @@ export class GameAudio {
     const t = this.ctx.currentTime;
     this.engOut.gain.setTargetAtTime(0, t, 0.08);
     this.whineGain.gain.setTargetAtTime(0, t, 0.08);
+    if (this.evOut) { this.evOut.gain.setTargetAtTime(0, t, 0.08); this.evHiss.gain.setTargetAtTime(0, t, 0.05); }
     this.skidGain.gain.setTargetAtTime(0, t, 0.05);
     if (this.windGain) { this.windGain.gain.setTargetAtTime(0, t, 0.08); this.roadGain.gain.setTargetAtTime(0, t, 0.08); }
     this._engG = 0;

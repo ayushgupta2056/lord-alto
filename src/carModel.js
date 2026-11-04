@@ -1077,6 +1077,7 @@ const noShadow = (mesh) => { Object.defineProperty(mesh, 'castShadow', { get: ()
 
 export function buildCarModel(carId, mods) {
   const car = CARS.find((c) => c.id === carId) || CARS[0];
+  if (car.shape.gen === 'scooter') return buildScooterModel(car, mods);
   const parts = getParts(car);
   const { geos, info } = parts, sp = info.sp;
 
@@ -1145,7 +1146,9 @@ export function buildCarModel(carId, mods) {
 export function applyMods(group, mods) {
   const st = group?.userData?._alto;
   if (!st) return;
-  const m = normMods(mods), prev = st.mods, { car, parts, inner } = st, info = parts.info, sp = info.sp;
+  const m = normMods(mods), prev = st.mods;
+  if (st.bike) { applyBikeMods(st, m, prev); return; }
+  const { car, parts, inner } = st, info = parts.info, sp = info.sp;
   const paintHex = m.paint || car.paint;
 
   const pm = paintMat(paintHex, sp.legend);
@@ -1198,4 +1201,165 @@ export function disposeCarModel(group) {
   st.plateTex.dispose();
   st.plateMat.dispose();
   st.disposed = true;
+}
+
+// ---------------------------------------------------------------- EV Bike (two-wheeler)
+// Ampere-V48-style electric scooter with a rider: red lower body and front apron, white leg shield top and
+// rear panels, black seat and floor, chrome carrier rack. Built from extruded side profiles (z forward, y up)
+// so the panels have real curves. The whole body (wheels and rider included) pivots at the ground to lean.
+const SCOOTER_TYRE = 0.235;
+
+// side profile [z, y][] -> extruded panel `w` wide, centred on x, with soft bevels
+function sideExtrude(pts, w, bevel = 0.03) {
+  const s = new THREE.Shape();
+  pts.forEach(([z, y], i) => (i ? s.lineTo(z, y) : s.moveTo(z, y)));
+  s.closePath();
+  const g = new THREE.ExtrudeGeometry(s, { depth: w - bevel * 2, bevelEnabled: true, bevelSize: bevel, bevelThickness: bevel, bevelSegments: 3, curveSegments: 8 });
+  g.rotateY(-PI / 2);
+  g.translate((w - bevel * 2) / 2, 0, 0);
+  return toCreasedNormals(g, 0.6);
+}
+const splinePts = (ctrl, n = 6) => new THREE.SplineCurve(ctrl.map(([z, y]) => new THREE.Vector2(z, y))).getPoints(ctrl.length * n).map((v) => [v.x, v.y]);
+// cylinder from a to b (for tubes, forks, limbs)
+function rod(a, b, r1, r2 = r1, seg = 10) {
+  const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b);
+  const len = A.distanceTo(B);
+  const g = new THREE.CylinderGeometry(r2, r1, len, seg);
+  g.translate(0, len / 2, 0);
+  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), B.clone().sub(A).normalize());
+  g.applyQuaternion(q); g.translate(A.x, A.y, A.z);
+  return g;
+}
+const sph = (r, x, y, z, sx = 1, sy = 1, sz = 1) => { const g = new THREE.SphereGeometry(r, 16, 12); g.scale(sx, sy, sz); g.translate(x, y, z); return g; };
+const rbox = (w, h, d, x, y, z, r = 0.03, rx = 0) => { const g = new RoundedBoxGeometry(w, h, d, 2, r); if (rx) g.rotateX(rx); g.translate(x, y, z); return g; };
+
+const scooterParts = () => once(PARTS, 'scooter', () => {
+  const red = [], white = [], black = [], chrome = [], lamp = [], tail = [], amber = [], skin = [], shirt = [], jeans = [], helmet = [], visor = [];
+  // front apron (red, lower) and leg-shield top (white), curving down into the floor
+  red.push(sideExtrude(splinePts([[0.36, 0.33], [0.52, 0.47], [0.64, 0.66], [0.69, 0.80], [0.48, 0.74], [0.36, 0.56], [0.27, 0.36]]), 0.5, 0.04));
+  white.push(sideExtrude(splinePts([[0.48, 0.73], [0.69, 0.79], [0.72, 0.93], [0.66, 1.0], [0.52, 1.0], [0.42, 0.86], [0.40, 0.74]]), 0.52, 0.04));
+  // red floor frame: low sweep from the apron under the floorboard and up into the tail
+  red.push(sideExtrude(splinePts([[0.40, 0.36], [0.20, 0.25], [-0.30, 0.25], [-0.52, 0.34], [-0.62, 0.42], [-0.50, 0.44], [-0.30, 0.34], [0.20, 0.33], [0.34, 0.42]]), 0.4, 0.035));
+  // black floorboard + inner leg shield
+  black.push(rbox(0.38, 0.03, 0.62, 0, 0.345, -0.02, 0.012));
+  black.push(sideExtrude([[0.42, 0.40], [0.47, 0.88], [0.40, 0.92], [0.33, 0.45]], 0.42, 0.02));
+  // white rear body under the seat, tapering into the tail lamp
+  white.push(sideExtrude(splinePts([[-0.22, 0.40], [-0.16, 0.74], [-0.50, 0.82], [-0.88, 0.80], [-1.0, 0.70], [-0.92, 0.58], [-0.62, 0.48], [-0.36, 0.42]]), 0.44, 0.05));
+  // black seat-front panel (between floor and seat)
+  black.push(sideExtrude([[-0.2, 0.36], [-0.14, 0.78], [-0.26, 0.80], [-0.34, 0.40]], 0.34, 0.02));
+  // red swingarm / motor cover over the rear wheel
+  red.push(sideExtrude(splinePts([[-0.40, 0.26], [-0.56, 0.36], [-0.80, 0.30], [-0.78, 0.18], [-0.52, 0.16]]), 0.2, 0.03).translate(0.14, 0, 0));
+  // seat
+  black.push(rbox(0.36, 0.11, 0.74, 0, 0.87, -0.52, 0.05, 0.05));
+  // rear mudguard
+  black.push(sideExtrude(splinePts([[-0.92, 0.6], [-1.02, 0.5], [-1.0, 0.32], [-0.94, 0.4]]), 0.16, 0.02));
+  // carrier rack + grab handle (chrome tubes)
+  for (const x of [-0.17, 0.17]) chrome.push(rod([x, 0.86, -0.78], [x, 0.9, -1.04], 0.016), rod([x, 0.8, -0.82], [x, 0.9, -0.82], 0.014));
+  chrome.push(rod([-0.17, 0.9, -1.04], [0.17, 0.9, -1.04], 0.016), rod([-0.17, 0.89, -0.92], [0.17, 0.89, -0.92], 0.012));
+  for (const x of [-0.16, 0.16]) chrome.push(rod([x, 0.86, -0.7], [x, 0.98, -0.74], 0.016));
+  chrome.push(rod([-0.16, 0.98, -0.74], [0.16, 0.98, -0.74], 0.016));
+  // front fork, steering column and handlebar
+  for (const x of [-0.09, 0.09]) chrome.push(rod([x, SCOOTER_TYRE, 0.66], [x, 0.66, 0.53], 0.024));
+  black.push(rod([0, 0.62, 0.52], [0, 1.08, 0.44], 0.04));
+  red.push(rbox(0.38, 0.12, 0.22, 0, 1.1, 0.45, 0.05, -0.25));
+  white.push(rbox(0.30, 0.06, 0.16, 0, 1.17, 0.42, 0.03, -0.25));
+  black.push(rod([-0.36, 1.1, 0.43], [0.36, 1.1, 0.43], 0.018));
+  for (const x of [-1, 1]) {
+    black.push(rod([x * 0.27, 1.1, 0.43], [x * 0.38, 1.1, 0.43], 0.025));
+    black.push(rod([x * 0.16, 1.12, 0.42], [x * 0.22, 1.42, 0.38], 0.009));
+    black.push(sph(0.05, x * 0.23, 1.44, 0.38, 1.1, 0.8, 0.35));
+    amber.push(sph(0.025, x * 0.17, 1.09, 0.58, 1.4, 0.8, 0.6));
+  }
+  // lamps: big headlamp on the apron, small one on the handlebar, tail lamp
+  lamp.push(sph(0.11, 0, 0.88, 0.69, 1.25, 0.72, 0.35));
+  lamp.push(sph(0.05, 0, 1.08, 0.56, 1.4, 0.7, 0.5));
+  tail.push(sph(0.07, 0, 0.71, -0.99, 1.7, 0.6, 0.4));
+  // rider: helmet, torso leaning forward, arms to the grips, knees tucked behind the leg shield
+  shirt.push(rbox(0.36, 0.5, 0.22, 0, 1.24, -0.38, 0.08, 0.22));
+  skin.push(rod([0, 1.48, -0.33], [0, 1.56, -0.31], 0.055));
+  skin.push(sph(0.12, 0, 1.64, -0.3, 0.9, 1, 1));
+  helmet.push(sph(0.15, 0, 1.68, -0.31, 1, 0.95, 1.08));
+  visor.push(sph(0.13, 0, 1.66, -0.24, 0.92, 0.55, 0.72));
+  for (const x of [-1, 1]) {
+    shirt.push(rod([x * 0.19, 1.43, -0.34], [x * 0.25, 1.24, -0.06], 0.05));
+    skin.push(rod([x * 0.25, 1.24, -0.06], [x * 0.31, 1.12, 0.4], 0.04));
+    skin.push(sph(0.045, x * 0.31, 1.11, 0.42));
+    jeans.push(rod([x * 0.11, 0.97, -0.46], [x * 0.17, 1.0, -0.02], 0.075));
+    jeans.push(rod([x * 0.17, 0.98, -0.02], [x * 0.15, 0.42, 0.06], 0.06));
+    black.push(rbox(0.1, 0.07, 0.24, x * 0.15, 0.4, 0.12, 0.03));
+  }
+  // merge each colour group into one geometry (position + normal only, so differing attributes never clash)
+  const m = (list) => {
+    if (!list.length) return null;
+    const flat = list.map((g) => {
+      const n = g.index ? g.toNonIndexed() : g;
+      for (const k of Object.keys(n.attributes)) if (k !== 'position' && k !== 'normal') n.deleteAttribute(k);
+      return n;
+    });
+    return mergeGeometries(flat);
+  };
+  return { red: m(red), white: m(white), black: m(black), chrome: m(chrome), lamp: m(lamp), tail: m(tail), amber: m(amber), skin: m(skin), shirt: m(shirt), jeans: m(jeans), helmet: m(helmet), visor: m(visor) };
+});
+
+const flatMat = (hex, rough = 0.6, metal = 0) => once(MAT, `flat:${hex}:${rough}`, () => new THREE.MeshStandardMaterial({ color: hex, roughness: rough, metalness: metal }));
+
+function buildScooterModel(car, mods) {
+  const P = scooterParts();
+  const group = new THREE.Group();
+  group.name = `car:${car.id}`;
+  // lean pivot at the contact patch: body.rotation.z tilts the whole bike + rider
+  const body = new THREE.Object3D(); body.name = 'body'; group.add(body);
+  const inner = new THREE.Object3D(); body.add(inner);
+  const brakeMat = BRAKE_PROTO.clone();
+  const plateCanvas = document.createElement('canvas'); plateCanvas.width = 512; plateCanvas.height = 124;
+  const plateTex = new THREE.CanvasTexture(plateCanvas); plateTex.colorSpace = THREE.SRGBColorSpace;
+  const plateMat = new THREE.MeshStandardMaterial({ map: plateTex, roughness: 0.45 });
+  const st = { car, bike: true, inner, paintMeshes: [], rimMeshes: [], brakeMat, plateCanvas, plateTex, plateMat, glow: null, mods: {} };
+  const add = (geo, mat, paint) => { if (!geo) return; const me = new THREE.Mesh(geo, mat); me.castShadow = true; inner.add(me); if (paint) st.paintMeshes.push(me); };
+  add(P.red, paintMat(car.paint), true);
+  add(P.white, flatMat(0xf4f4f2, 0.35, 0.05));
+  add(P.black, flatMat(0x18181b, 0.75));
+  add(P.chrome, chromeMat());
+  add(P.lamp, lampMat());
+  add(P.tail, brakeMat);
+  add(P.amber, amberMat());
+  add(P.skin, flatMat(0xb97a52, 0.7));
+  add(P.shirt, flatMat(0x2f5fb3, 0.8));
+  add(P.jeans, flatMat(0x26324a, 0.85));
+  add(P.helmet, paintMat('#ffffff'));
+  add(P.visor, flatMat(0x101418, 0.1, 0.6));
+  // small rear plate under the tail lamp
+  const plate = new THREE.Mesh(once(GEO, 'scooterPlate', () => new THREE.PlaneGeometry(0.2, 0.06)), plateMat);
+  plate.position.set(0, 0.56, -1.025); plate.rotation.y = PI; inner.add(plate);
+
+  // wheels: the car tyre/rim slimmed to scooter size; children of the body so they lean with it
+  const wheels = [], pivots = [];
+  [0.66, -0.66].forEach((z, i) => {
+    const pivot = new THREE.Object3D(); pivot.position.set(0, SCOOTER_TYRE, z);
+    const wheel = new THREE.Object3D(); pivot.add(wheel);
+    const holder = new THREE.Object3D(); wheel.add(holder);
+    const k = SCOOTER_TYRE / WHEEL_R; holder.scale.set(0.55, k, k);
+    const tyre = new THREE.Mesh(tyreGeo(), tyreMat()); tyre.castShadow = true;
+    const rim = new THREE.Mesh(rimGeo(), rimMat(DEFAULT_MODS.rim));
+    holder.add(tyre, rim); st.rimMeshes.push(rim);
+    inner.add(pivot);
+    wheels.push(wheel);
+    if (i === 0) pivots.push(pivot);
+  });
+  const exhaust = new THREE.Object3D(); exhaust.name = 'exhaust'; exhaust.position.set(0.12, 0.3, -0.85); inner.add(exhaust);
+  const glow = noShadow(new THREE.Mesh(glowGeo(car.shape.length, 0.9), glowMat('#ffffff')));
+  glow.position.y = 0.03; glow.visible = false; group.add(glow); st.glow = glow;
+  group.userData = { wheels, wheelPivots: pivots, body, brakeMat, exhaust, radius: SCOOTER_TYRE, carId: car.id, bike: true, _alto: st };
+  applyMods(group, mods);
+  return group;
+}
+
+// EV Bike: paint, rims, plate and underglow apply; spoilers and stickers are car-only
+function applyBikeMods(st, m, prev) {
+  const pm = paintMat(m.paint || st.car.paint);
+  for (const mesh of st.paintMeshes) mesh.material = pm;
+  for (const r of st.rimMeshes) r.material = rimMat(m.rim);
+  if (m.plate !== prev.plate) { drawPlate(st.plateCanvas.getContext('2d'), m.plate); st.plateTex.needsUpdate = true; }
+  if (m.underglow) { st.glow.material = glowMat(m.underglow); st.glow.visible = true; } else st.glow.visible = false;
+  st.mods = m;
 }

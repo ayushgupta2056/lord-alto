@@ -14,7 +14,8 @@ export class CarPhysics {
     this.x = 0; this.z = 0; this.h = 0;
     this.vx = 0; this.vz = 0;
     this.yaw = 0;
-    this.kick = 0; // extra body rotation (rad/s) from a knock: a clipped corner twists the car, then grip catches it
+    this.kick = 0;
+    this.colR = 0.78; this.colOff = 1.05; this.halfW = 0.95; this.mass = 1; // collision body (the EV Bike is slimmer and lighter) // extra body rotation (rad/s) from a knock: a clipped corner twists the car, then grip catches it
     this.steer = 0; // smoothed wheel angle input -1..1
     this.nitroTank = 0.35;
     this.nitroOn = false;
