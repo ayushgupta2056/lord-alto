@@ -1236,13 +1236,13 @@ const rbox = (w, h, d, x, y, z, r = 0.03, rx = 0) => { const g = new RoundedBoxG
 const scooterParts = () => once(PARTS, 'scooter', () => {
   const red = [], white = [], black = [], chrome = [], lamp = [], tail = [], amber = [], skin = [], shirt = [], jeans = [], helmet = [], visor = [];
   // front apron (red, lower) and leg-shield top (white), curving down into the floor
-  red.push(sideExtrude(splinePts([[0.36, 0.33], [0.52, 0.47], [0.64, 0.66], [0.69, 0.80], [0.48, 0.74], [0.36, 0.56], [0.27, 0.36]]), 0.5, 0.04));
-  white.push(sideExtrude(splinePts([[0.48, 0.73], [0.69, 0.79], [0.72, 0.93], [0.66, 1.0], [0.52, 1.0], [0.42, 0.86], [0.40, 0.74]]), 0.52, 0.04));
+  red.push(sideExtrude(splinePts([[0.36, 0.33], [0.52, 0.47], [0.64, 0.66], [0.69, 0.80], [0.48, 0.74], [0.36, 0.56], [0.27, 0.36]]), 0.34, 0.04));
+  white.push(sideExtrude(splinePts([[0.48, 0.73], [0.69, 0.79], [0.72, 0.93], [0.66, 1.0], [0.52, 1.0], [0.42, 0.86], [0.40, 0.74]]), 0.42, 0.04));
   // red floor frame: low sweep from the apron under the floorboard and up into the tail
   red.push(sideExtrude(splinePts([[0.40, 0.36], [0.20, 0.25], [-0.30, 0.25], [-0.52, 0.34], [-0.62, 0.42], [-0.50, 0.44], [-0.30, 0.34], [0.20, 0.33], [0.34, 0.42]]), 0.4, 0.035));
   // black floorboard + inner leg shield
   black.push(rbox(0.38, 0.03, 0.62, 0, 0.345, -0.02, 0.012));
-  black.push(sideExtrude([[0.42, 0.40], [0.47, 0.88], [0.40, 0.92], [0.33, 0.45]], 0.42, 0.02));
+  black.push(sideExtrude([[0.42, 0.40], [0.47, 0.88], [0.40, 0.92], [0.33, 0.45]], 0.34, 0.02));
   // white rear body under the seat, tapering into the tail lamp
   white.push(sideExtrude(splinePts([[-0.22, 0.40], [-0.16, 0.74], [-0.50, 0.82], [-0.88, 0.80], [-1.0, 0.70], [-0.92, 0.58], [-0.62, 0.48], [-0.36, 0.42]]), 0.44, 0.05));
   // black seat-front panel (between floor and seat)
@@ -1254,10 +1254,11 @@ const scooterParts = () => once(PARTS, 'scooter', () => {
   // rear mudguard
   black.push(sideExtrude(splinePts([[-0.92, 0.6], [-1.02, 0.5], [-1.0, 0.32], [-0.94, 0.4]]), 0.16, 0.02));
   // carrier rack + grab handle (chrome tubes)
-  for (const x of [-0.17, 0.17]) chrome.push(rod([x, 0.86, -0.78], [x, 0.9, -1.04], 0.016), rod([x, 0.8, -0.82], [x, 0.9, -0.82], 0.014));
-  chrome.push(rod([-0.17, 0.9, -1.04], [0.17, 0.9, -1.04], 0.016), rod([-0.17, 0.89, -0.92], [0.17, 0.89, -0.92], 0.012));
-  for (const x of [-0.16, 0.16]) chrome.push(rod([x, 0.86, -0.7], [x, 0.98, -0.74], 0.016));
-  chrome.push(rod([-0.16, 0.98, -0.74], [0.16, 0.98, -0.74], 0.016));
+  for (const x of [-0.17, 0.17]) black.push(rod([x, 0.86, -0.78], [x, 0.9, -1.06], 0.017), rod([x, 0.8, -0.84], [x, 0.9, -0.84], 0.015));
+  black.push(rod([-0.17, 0.9, -1.06], [0.17, 0.9, -1.06], 0.017));
+  for (const z of [-0.9, -0.98]) black.push(rod([-0.17, 0.895, z], [0.17, 0.895, z], 0.011));
+  for (const x of [-0.16, 0.16]) black.push(rod([x, 0.86, -0.68], [x, 1.0, -0.72], 0.018));
+  black.push(rod([-0.16, 1.0, -0.72], [0.16, 1.0, -0.72], 0.018));
   // front fork, steering column and handlebar
   for (const x of [-0.09, 0.09]) chrome.push(rod([x, SCOOTER_TYRE, 0.66], [x, 0.66, 0.53], 0.024));
   black.push(rod([0, 0.62, 0.52], [0, 1.08, 0.44], 0.04));
@@ -1266,14 +1267,15 @@ const scooterParts = () => once(PARTS, 'scooter', () => {
   black.push(rod([-0.36, 1.1, 0.43], [0.36, 1.1, 0.43], 0.018));
   for (const x of [-1, 1]) {
     black.push(rod([x * 0.27, 1.1, 0.43], [x * 0.38, 1.1, 0.43], 0.025));
-    black.push(rod([x * 0.16, 1.12, 0.42], [x * 0.22, 1.42, 0.38], 0.009));
-    black.push(sph(0.05, x * 0.23, 1.44, 0.38, 1.1, 0.8, 0.35));
+    black.push(rod([x * 0.16, 1.12, 0.42], [x * 0.25, 1.5, 0.36], 0.009));
+    black.push(sph(0.06, x * 0.27, 1.53, 0.36, 1.25, 0.85, 0.3));
     amber.push(sph(0.025, x * 0.17, 1.09, 0.58, 1.4, 0.8, 0.6));
   }
   // lamps: big headlamp on the apron, small one on the handlebar, tail lamp
-  lamp.push(sph(0.11, 0, 0.88, 0.69, 1.25, 0.72, 0.35));
-  lamp.push(sph(0.05, 0, 1.08, 0.56, 1.4, 0.7, 0.5));
-  tail.push(sph(0.07, 0, 0.71, -0.99, 1.7, 0.6, 0.4));
+  lamp.push(sph(0.13, 0, 0.89, 0.69, 1.3, 0.75, 0.32));
+  for (const x of [-1, 1]) lamp.push(sph(0.045, x * 0.09, 1.1, 0.565, 1.35, 0.8, 0.45));
+  for (const x of [-1, 1]) lamp.push(sph(0.05, x * 0.16, 0.73, -0.96, 0.6, 0.55, 1.5));
+  tail.push(sph(0.06, 0, 0.72, -0.995, 1.8, 0.55, 0.35));
   // rider: helmet, torso leaning forward, arms to the grips, knees tucked behind the leg shield
   shirt.push(rbox(0.36, 0.5, 0.22, 0, 1.24, -0.38, 0.08, 0.22));
   skin.push(rod([0, 1.48, -0.33], [0, 1.56, -0.31], 0.055));
@@ -1303,6 +1305,26 @@ const scooterParts = () => once(PARTS, 'scooter', () => {
 
 const flatMat = (hex, rough = 0.6, metal = 0) => once(MAT, `flat:${hex}:${rough}`, () => new THREE.MeshStandardMaterial({ color: hex, roughness: rough, metalness: metal }));
 
+// White-panel decal: blue double swoosh and a "V48" badge (stylised, no maker logo)
+const scooterDecalMat = () => once(MAT, 'scooterDecal', () => {
+  const tex = canvasTex(512, 192, (g, w, h) => {
+    g.clearRect(0, 0, w, h);
+    g.lineCap = 'round';
+    for (const [lw, col, dy] of [[9, '#1f3f9a', 0], [4, '#5aa0ff', 16]]) {
+      g.strokeStyle = col; g.lineWidth = lw;
+      g.beginPath(); g.moveTo(20, 150 + dy); g.bezierCurveTo(140, 70 + dy, 300, 190 + dy, 500, 60 + dy); g.stroke();
+    }
+    g.fillStyle = '#1f3f9a';
+    g.beginPath(); g.moveTo(60, 120); g.bezierCurveTo(110, 70, 170, 70, 210, 95); g.bezierCurveTo(160, 92, 120, 105, 60, 120); g.fill();
+    g.font = 'italic 900 72px "Arial Black", Impact, sans-serif';
+    g.fillStyle = '#1f3f9a'; g.textAlign = 'right'; g.textBaseline = 'alphabetic';
+    g.fillText('V48', 470, 120);
+    g.font = '800 26px Arial, sans-serif'; g.fillStyle = '#2aa84a';
+    g.fillText('ELECTRIC', 470, 46);
+  }, 'scooterDecal');
+  return new THREE.MeshStandardMaterial({ map: tex, transparent: true, roughness: 0.4, depthWrite: false, ...decal });
+});
+
 function buildScooterModel(car, mods) {
   const P = scooterParts();
   const group = new THREE.Group();
@@ -1328,6 +1350,14 @@ function buildScooterModel(car, mods) {
   add(P.jeans, flatMat(0x26324a, 0.85));
   add(P.helmet, paintMat('#ffffff'));
   add(P.visor, flatMat(0x101418, 0.1, 0.6));
+  // decals on both sides of the rear panel and the front leg shield (readable from either side)
+  const decalGeo = (w, h) => once(GEO, `scooterDecal:${w}:${h}`, () => new THREE.PlaneGeometry(w, h));
+  for (const sx of [-1, 1]) {
+    const back = new THREE.Mesh(decalGeo(0.42, 0.16), scooterDecalMat());
+    back.position.set(sx * 0.228, 0.66, -0.6); back.rotation.y = sx * PI / 2; back.renderOrder = 3; inner.add(back);
+    const front = new THREE.Mesh(decalGeo(0.24, 0.09), scooterDecalMat());
+    front.position.set(sx * 0.215, 0.87, 0.56); front.rotation.y = sx * PI / 2; front.renderOrder = 3; inner.add(front);
+  }
   // small rear plate under the tail lamp
   const plate = new THREE.Mesh(once(GEO, 'scooterPlate', () => new THREE.PlaneGeometry(0.2, 0.06)), plateMat);
   plate.position.set(0, 0.56, -1.025); plate.rotation.y = PI; inner.add(plate);
