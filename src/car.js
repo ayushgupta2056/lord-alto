@@ -116,7 +116,11 @@ export class CarPhysics {
     }
 
     let yawTarget = vF * Math.tan(wheel) / WHEELBASE;
-    yawTarget *= 1 + 0.6 * this.driftBlend * dfac;
+    const latMax = 20 * s.handling * (this.gripMul ?? 1);
+    const yawCap = latMax / Math.max(4, speedAbs);
+    if (yawTarget > yawCap) yawTarget = yawCap; else if (yawTarget < -yawCap) yawTarget = -yawCap;
+    // Drifting rotates the car past that limit: the way to turn tighter at speed
+    yawTarget *= 1 + 0.75 * this.driftBlend * dfac;
     if (spinning) this.yaw += (Math.sign(this.yaw || 1) * 7 - this.yaw) * Math.min(1, 3 * dt);
     else this.yaw += (yawTarget - this.yaw) * Math.min(1, (28 - 18 * this.driftBlend) * dt);
     const hOld = this.h;

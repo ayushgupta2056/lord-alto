@@ -332,6 +332,7 @@ export class Race {
     let dh = b.h - a.h; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
     const prevX = p.x, prevZ = p.z;
     p.x = nx; p.z = nz; p.h = a.h + dh * k;
+    p.yaw = span > 0 ? dh / (span / 1000) : 0;
     p.vx = (b.x - a.x) / Math.max(0.03, span / 1000); p.vz = (b.z - a.z) / Math.max(0.03, span / 1000);
     p.steer = b.steer; p.nitroOn = !!b.nitro; p.drifting = !!b.drift;
     if (Math.hypot(nx - prevX, nz - prevZ) > 30) { /* teleport (respawn): nothing to smooth */ }
@@ -536,16 +537,26 @@ export class Race {
     c.wheelSpin += v * dt / (u.radius || 0.29);
     if (u.wheels) for (const w of u.wheels) w.rotation.x = c.wheelSpin;
     if (u.wheelPivots) for (const w of u.wheelPivots) w.rotation.y = p.steer * 0.5;
-    if (u.body && u.bike) {
-      // two-wheeler: lean INTO the turn (more with speed), a little wobble while drifting
-      const leanT = THREE.MathUtils.clamp(p.yaw * Math.abs(v) * 0.03, -0.55, 0.55) + (p.drifting ? Math.sin(performance.now() / 90) * 0.02 : 0);
-      u.body.rotation.z += (leanT - u.body.rotation.z) * Math.min(1, dt * 7);
-      u.body.rotation.x += ((p.brake > 0 && v > 1 ? 0.04 : 0) - (p.nitroOn ? 0.05 : 0) - u.body.rotation.x) * Math.min(1, dt * 6);
-    } else if (u.body) {
-      const rollT = THREE.MathUtils.clamp(-p.yaw * Math.abs(v) * 0.0045, -0.09, 0.09);
-      const pitchT = THREE.MathUtils.clamp((p.brake > 0 && v > 1 ? 0.03 : 0) - (p.throttle > 0 ? 0.012 : 0), -0.05, 0.05);
-      u.body.rotation.z += (rollT - u.body.rotation.z) * Math.min(1, dt * 8);
-      u.body.rotation.x += (pitchT - u.body.rotation.x) * Math.min(1, dt * 6);
+    if (u.body && dt > 0) {
+      // Lateral and longitudinal acceleration drive the body: lateral = v * yaw rate, longitudinal from the
+      // change in speed (smoothed, so a single bumpy frame doesn't jolt the model)
+      const latG = (v * p.yaw) / 9.81;
+      const aLong = (v - (c.vPrev ?? v)) / dt; c.vPrev = v;
+      c.aLong = (c.aLong ?? 0) + (aLong - (c.aLong ?? 0)) * Math.min(1, dt * 10);
+      if (u.bike) {
+        // Two-wheeler: lean INTO the turn at the angle that balances it, tan(lean) = v * yaw / g
+        const lean = THREE.MathUtils.clamp(Math.atan(latG), -0.75, 0.75) + (p.drifting ? Math.sin(performance.now() / 90) * 0.02 : 0);
+        u.body.rotation.z += (-lean - u.body.rotation.z) * Math.min(1, dt * 9);
+        u.body.rotation.x += (THREE.MathUtils.clamp(-c.aLong * 0.002, -0.04, 0.04) - u.body.rotation.x) * Math.min(1, dt * 6);
+      } else {
+        // Car: spring-damped body roll away from the turn, squat under power, dive under braking
+        const rollT = THREE.MathUtils.clamp(latG * 0.032, -0.085, 0.085);
+        const pitchT = THREE.MathUtils.clamp(-c.aLong * 0.0028, -0.045, 0.06);
+        c.rollV = (c.rollV ?? 0) + ((rollT - u.body.rotation.z) * 140 - (c.rollV ?? 0) * 15) * dt;
+        c.pitchV = (c.pitchV ?? 0) + ((pitchT - u.body.rotation.x) * 120 - (c.pitchV ?? 0) * 13) * dt;
+        u.body.rotation.z += c.rollV * dt;
+        u.body.rotation.x += c.pitchV * dt;
+      }
     }
     if (u.brakeMat) u.brakeMat.emissiveIntensity = p.brake > 0.1 && v > 0.5 ? 2.5 : 0.35;
     if (u.halo) u.halo.position.y = (u.haloBase ??= u.halo.position.y) + Math.sin(performance.now() / 400) * 0.06;

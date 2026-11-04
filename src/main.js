@@ -361,6 +361,9 @@ function updateCamera(dt) {
   camLook.set(p.x + fx_ * ahead - rx * camDrift * 1.6, y + (portrait ? 0.55 : 0.95), p.z + fz * ahead - rz * camDrift * 1.6);
   camera.position.copy(camPos);
   camera.lookAt(camLook);
+  // On the EV Bike the camera banks a quarter of the lean (camera +z points backward, hence the minus)
+  const bikeBody = race.me.def.bike ? race.me.model.userData.body : null;
+  if (bikeBody) camera.rotateZ(-bikeBody.rotation.z * 0.25);
   // Road rumble at high speed: a faint constant buzz on top of impact shake
   if (v > 28) {
     const t = performance.now() / 1000, a = Math.min(1, (v - 28) / 30) * (p.nitroOn ? 0.035 : 0.018);
